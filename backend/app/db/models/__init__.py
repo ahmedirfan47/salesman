@@ -1,8 +1,12 @@
 """Import all models here so Alembic autogenerate sees them via Base.metadata."""
 
+from app.db.models.escalation import Escalation
 from app.db.models.inventory import Inventory
 from app.db.models.inventory_transaction import InventoryTransaction
+from app.db.models.order import Order
+from app.db.models.order_item import OrderItem
 from app.db.models.price_list import PriceList
+from app.db.models.print_job import PrintJob
 from app.db.models.product import Product
 from app.db.models.product_price import ProductPrice
 from app.db.models.tenant import Tenant
@@ -16,4 +20,8 @@ __all__ = [
     "ProductPrice",
     "Inventory",
     "InventoryTransaction",
+    "Order",
+    "OrderItem",
+    "Escalation",
+    "PrintJob",
 ]

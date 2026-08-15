@@ -6,7 +6,7 @@ create_order():
     cannot oversell the last units
   - if every line has enough stock -> CONFIRM atomically:
         decrement inventory via the immutable ledger,
-        snapshot unit prices, set status='confirmed'
+        snapshot unit prices, set status='confirmed', queue a print slip
   - if any line is short -> status='requires_human_review' + create an
     Escalation row (no stock is touched). A human approves/rejects later.
 
@@ -28,6 +28,7 @@ from app.db.models.order import Order
 from app.db.models.order_item import OrderItem
 from app.db.models.product import Product
 from app.db.models.product_price import ProductPrice
+from app.modules.printing import service as printing_service
 from app.schemas.order import OrderCreate
 
 
@@ -204,6 +205,17 @@ async def create_order(
         )
 
     order.total_amount = total
+    slip_items = [
+        {
+            "sku": e["product"].sku,
+            "name": e["product"].name_en,
+            "quantity": e["quantity"],
+            "unit_price": float(e["price"].unit_price),
+            "line_total": float(Decimal(str(e["price"].unit_price)) * e["quantity"]),
+        }
+        for e in resolved
+    ]
+    await printing_service.enqueue_for_order(db, tenant_id, order, slip_items)
     await db.commit()
     await db.refresh(order)
     return order
@@ -297,6 +309,17 @@ async def resolve_escalation(
         )
         order.status = "confirmed"
         order.confirmed_at = now
+        slip_items = [
+            {
+                "sku": i.sku,
+                "name": i.product_name,
+                "quantity": i.quantity,
+                "unit_price": float(i.unit_price),
+                "line_total": float(i.line_total),
+            }
+            for i in order.items
+        ]
+        await printing_service.enqueue_for_order(db, tenant_id, order, slip_items)
     elif order is not None:
         order.status = "cancelled"
         order.cancelled_at = now
