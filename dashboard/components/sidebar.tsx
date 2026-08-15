@@ -8,6 +8,9 @@ import {
   Tag,
   ShoppingCart,
   AlertTriangle,
+  FileBarChart,
+  Printer,
+  MessageSquare,
   LogOut,
 } from "lucide-react";
 import { clearToken } from "@/lib/api";
@@ -18,6 +21,9 @@ const nav = [
   { href: "/pricing", label: "Pricing", icon: Tag },
   { href: "/orders", label: "Orders", icon: ShoppingCart },
   { href: "/escalations", label: "Escalations", icon: AlertTriangle },
+  { href: "/conversations", label: "Conversations", icon: MessageSquare },
+  { href: "/reports", label: "Reports", icon: FileBarChart },
+  { href: "/printing", label: "Print Queue", icon: Printer },
 ];
 
 export default function Sidebar() {
