@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Plus } from "lucide-react";
 
 type Order = {
   id: string;
@@ -34,8 +37,18 @@ export default function OrdersPage() {
 
   return (
     <div>
-      <h1 className="mb-1 text-2xl font-bold">Orders</h1>
-      <p className="mb-6 text-sm text-slate-500">{orders.length} orders</p>
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="mb-1 text-2xl font-bold">Orders</h1>
+          <p className="text-sm text-slate-500">{orders.length} orders</p>
+        </div>
+        <Link href="/orders/new">
+          <Button>
+            <Plus size={16} />
+            New Order
+          </Button>
+        </Link>
+      </div>
       {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
       <Card className="overflow-hidden">
         <table className="w-full text-sm">
