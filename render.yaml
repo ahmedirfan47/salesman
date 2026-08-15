@@ -1,0 +1,29 @@
+databases:
+  - name: salesman-db
+    databaseName: salesman
+    plan: free
+
+services:
+  - type: web
+    name: salesman-backend
+    runtime: docker
+    plan: free
+    rootDir: backend
+    dockerfilePath: Dockerfile
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: salesman-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ENVIRONMENT
+        value: production
+      - key: CORS_ORIGINS
+        sync: false
+      - key: LLM_BASE_URL
+        sync: false
+      - key: LLM_MODEL
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
