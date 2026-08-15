@@ -48,16 +48,28 @@ async def receive(request: Request):
                 profile_name = contacts[0].get("profile", {}).get("name")
 
             for msg in messages:
-                if msg.get("type") != "text":
-                    continue  # non-text handled later (voice module)
+                mtype = msg.get("type")
                 from_number = msg.get("from")
-                text = msg.get("text", {}).get("body", "")
                 wa_message_id = msg.get("id")
-                if not (phone_number_id and from_number and text):
+                if not (phone_number_id and from_number):
                     continue
-                async with SessionLocal() as db:
-                    await service.process_incoming(
-                        db, phone_number_id, from_number, text, wa_message_id, profile_name
-                    )
+
+                if mtype == "text":
+                    text = msg.get("text", {}).get("body", "")
+                    if not text:
+                        continue
+                    async with SessionLocal() as db:
+                        await service.process_incoming(
+                            db, phone_number_id, from_number, text, wa_message_id, profile_name
+                        )
+                elif mtype == "audio":
+                    media_id = msg.get("audio", {}).get("id")
+                    if not media_id:
+                        continue
+                    async with SessionLocal() as db:
+                        await service.process_incoming_audio(
+                            db, phone_number_id, from_number, media_id, wa_message_id, profile_name
+                        )
+                # other types (image, document, etc.) ignored for now
 
     return {"status": "received"}

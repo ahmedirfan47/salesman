@@ -2,8 +2,10 @@
 
 - verify_signature: confirm a POST really came from Meta (HMAC on the raw body)
 - send_text: reply to a customer via the Graph API
-- process_incoming: route an inbound message to the tenant, run the AI agent,
-  send the reply, and persist the conversation.
+- process_incoming: route an inbound text message to the tenant, run the AI
+  agent, send the reply, and persist the conversation.
+- process_incoming_audio: download a voice note, transcribe it, then reuse the
+  text pipeline.
 """
 import hashlib
 import hmac
@@ -15,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.agent import run_agent
+from app.ai.transcribe import transcribe
 from app.config import settings
 from app.db.models.conversation import Conversation
 from app.db.models.message import Message
@@ -96,6 +99,71 @@ async def _history(db: AsyncSession, conversation_id: uuid.UUID) -> list[dict]:
     ]
 
 
+async def _download_media(tenant: Tenant, media_id: str) -> tuple[bytes, str] | None:
+    """Fetch a WhatsApp media file: first resolve the media URL, then download it.
+    Returns (bytes, filename) or None."""
+    if not tenant.whatsapp_access_token:
+        return None
+    headers = {"Authorization": f"Bearer {tenant.whatsapp_access_token}"}
+    async with httpx.AsyncClient(timeout=30) as client:
+        meta = await client.get(f"{settings.WHATSAPP_API_BASE}/{media_id}", headers=headers)
+        meta.raise_for_status()
+        info = meta.json()
+        url = info.get("url")
+        mime = info.get("mime_type", "audio/ogg")
+        if not url:
+            return None
+        audio = await client.get(url, headers=headers)
+        audio.raise_for_status()
+        ext = "ogg"
+        if "mp4" in mime or "m4a" in mime:
+            ext = "m4a"
+        elif "mpeg" in mime or "mp3" in mime:
+            ext = "mp3"
+        elif "wav" in mime:
+            ext = "wav"
+        return audio.content, f"voice.{ext}"
+
+
+async def process_incoming_audio(
+    db: AsyncSession,
+    phone_number_id: str,
+    from_number: str,
+    media_id: str,
+    wa_message_id: str | None,
+    profile_name: str | None = None,
+) -> None:
+    """Voice-note pipeline: download audio -> transcribe -> reuse the text pipeline."""
+    tenant = await db.scalar(
+        select(Tenant).where(Tenant.whatsapp_phone_number_id == phone_number_id)
+    )
+    if not tenant:
+        return
+    media = await _download_media(tenant, media_id)
+    if not media:
+        return
+    audio_bytes, filename = media
+    try:
+        text = await transcribe(audio_bytes, filename)
+    except Exception:
+        text = ""
+    if not text:
+        conv = await _get_or_create_conversation(db, tenant.id, from_number, profile_name)
+        db.add(Message(
+            tenant_id=tenant.id, conversation_id=conv.id, direction="in",
+            sender="customer", msg_type="audio", content="[voice note - could not transcribe]",
+            wa_message_id=wa_message_id,
+        ))
+        await db.commit()
+        await send_text(tenant, from_number, "Sorry, I couldn't understand that voice note. Could you type your message or send it again?")
+        return
+
+    await process_incoming(
+        db, phone_number_id, from_number, text, wa_message_id, profile_name,
+        inbound_type="audio",
+    )
+
+
 async def process_incoming(
     db: AsyncSession,
     phone_number_id: str,
@@ -103,33 +171,30 @@ async def process_incoming(
     text: str,
     wa_message_id: str | None,
     profile_name: str | None = None,
+    inbound_type: str = "text",
 ) -> None:
-    """Full inbound pipeline for one text message."""
+    """Full inbound pipeline for one message (text, or a transcribed voice note)."""
     tenant = await db.scalar(
         select(Tenant).where(Tenant.whatsapp_phone_number_id == phone_number_id)
     )
     if not tenant:
-        # no tenant owns this WhatsApp number; ignore
         return
 
     conv = await _get_or_create_conversation(db, tenant.id, from_number, profile_name)
 
-    # build history BEFORE storing the new inbound message
     history = await _history(db, conv.id)
 
     now = datetime.now(timezone.utc)
     db.add(Message(
         tenant_id=tenant.id, conversation_id=conv.id, direction="in",
-        sender="customer", content=text, wa_message_id=wa_message_id,
+        sender="customer", msg_type=inbound_type, content=text, wa_message_id=wa_message_id,
     ))
     conv.last_message_at = now
     await db.commit()
 
-    # run the agent
     result = await run_agent(db, tenant.id, tenant.name, history, text)
     reply = result.get("reply") or "Sorry, I couldn't process that. A team member will follow up."
 
-    # store + send the reply
     db.add(Message(
         tenant_id=tenant.id, conversation_id=conv.id, direction="out",
         sender="ai", content=reply,

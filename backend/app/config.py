@@ -23,7 +23,11 @@ class Settings(BaseSettings):
     # LLM (OpenAI-compatible endpoint; Ollama by default)
     LLM_BASE_URL: str = "http://localhost:11434/v1"
     LLM_MODEL: str = "qwen2.5"
-    LLM_API_KEY: str = "ollama"
+    LLM_API_KEY: str = "ollama"  # Ollama ignores this; real providers need a key
+
+    # Speech-to-text (uses the same OpenAI-compatible provider as the LLM)
+    STT_BASE_URL: str = ""   # defaults to LLM_BASE_URL if empty
+    STT_MODEL: str = "whisper-large-v3-turbo"
 
     # WhatsApp (Meta Cloud API)
     WHATSAPP_VERIFY_TOKEN: str = ""   # for the webhook GET challenge
@@ -37,6 +41,8 @@ class Settings(BaseSettings):
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def _normalize_db_url(cls, v: str) -> str:
+        """Render/Railway give 'postgres://' or 'postgresql://'. We need the
+        async driver, so rewrite to 'postgresql+asyncpg://' when needed."""
         if isinstance(v, str):
             if v.startswith("postgres://"):
                 v = v.replace("postgres://", "postgresql+asyncpg://", 1)
