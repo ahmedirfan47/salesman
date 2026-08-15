@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query, status
 from app.core.deps import CurrentUser, DBSession, require_role
 from app.core.enums import UserRole
 from app.modules.products import service
-from app.schemas.product import ProductCreate, ProductOut, ProductUpdate
+from app.schemas.product import ProductCatalogRow, ProductCreate, ProductOut, ProductUpdate
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -21,6 +21,12 @@ async def list_products(
     return await service.list_products(
         db, user.tenant_id, limit=limit, offset=offset, active_only=active_only
     )
+
+
+@router.get("/catalog", response_model=list[ProductCatalogRow])
+async def product_catalog(db: DBSession, user: CurrentUser) -> list[ProductCatalogRow]:
+    """Products with current price + stock, for the dashboard products table."""
+    return await service.list_catalog(db, user.tenant_id)
 
 
 @router.post(

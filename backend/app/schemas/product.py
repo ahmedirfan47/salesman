@@ -33,3 +33,15 @@ class ProductOut(BaseModel):
     category: str | None
     is_active: bool
     created_at: datetime
+
+
+class ProductCatalogRow(BaseModel):
+    id: uuid.UUID
+    sku: str
+    name_en: str
+    name_ar: str | None
+    category: str | None
+    is_active: bool
+    unit_price: float | None
+    currency: str | None
+    stock: int
