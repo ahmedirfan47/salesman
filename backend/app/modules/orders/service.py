@@ -25,6 +25,7 @@ from app.db.models.escalation import Escalation
 from app.db.models.inventory import Inventory
 from app.db.models.inventory_transaction import InventoryTransaction
 from app.db.models.order import Order
+from app.db.models.order_event import OrderEvent
 from app.db.models.order_item import OrderItem
 from app.db.models.product import Product
 from app.db.models.product_price import ProductPrice
@@ -333,3 +334,76 @@ async def resolve_escalation(
     await db.commit()
     await db.refresh(esc)
     return esc
+
+
+# --- order lifecycle transitions -------------------------------------------
+
+# who can move to what: current_status -> allowed next statuses
+ALLOWED_TRANSITIONS: dict[str, set[str]] = {
+    "confirmed": {"dispatched", "cancelled"},
+    "dispatched": {"delivered", "cancelled"},
+    "delivered": {"completed"},
+}
+
+# timestamp column to stamp for a given target status (if the column exists)
+_STATUS_TIMESTAMP = {
+    "confirmed": "confirmed_at",
+    "cancelled": "cancelled_at",
+}
+
+
+async def transition_order(
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    order_id: uuid.UUID,
+    to_status: str,
+    *,
+    actor_id: uuid.UUID | None = None,
+    actor_name: str | None = None,
+    note: str | None = None,
+) -> Order:
+    order = await db.scalar(
+        select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id)
+    )
+    if not order:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Order not found")
+
+    current = order.status
+    allowed = ALLOWED_TRANSITIONS.get(current, set())
+    if to_status not in allowed:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Cannot move an order from '{current}' to '{to_status}'. "
+            f"Allowed from here: {', '.join(sorted(allowed)) or 'none'}.",
+        )
+
+    now = datetime.now(timezone.utc)
+    order.status = to_status
+    ts_field = _STATUS_TIMESTAMP.get(to_status)
+    if ts_field and hasattr(order, ts_field):
+        setattr(order, ts_field, now)
+
+    db.add(OrderEvent(
+        tenant_id=tenant_id,
+        order_id=order.id,
+        from_status=current,
+        to_status=to_status,
+        actor_id=actor_id,
+        actor_name=actor_name,
+        note=note,
+    ))
+    await db.commit()
+    await db.refresh(order)
+    return order
+
+
+async def list_order_events(
+    db: AsyncSession, tenant_id: uuid.UUID, order_id: uuid.UUID
+) -> list[OrderEvent]:
+    return list(
+        await db.scalars(
+            select(OrderEvent)
+            .where(OrderEvent.tenant_id == tenant_id, OrderEvent.order_id == order_id)
+            .order_by(OrderEvent.created_at)
+        )
+    )

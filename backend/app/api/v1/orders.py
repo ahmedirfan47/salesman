@@ -8,7 +8,10 @@ from app.modules.orders import service
 from app.schemas.order import (
     EscalationOut,
     OrderCreate,
+    OrderDetailOut,
+    OrderEventOut,
     OrderOut,
+    OrderTransition,
     ResolveEscalation,
 )
 
@@ -27,9 +30,26 @@ async def create_order(data: OrderCreate, db: DBSession, user: CurrentUser) -> O
     return await service.create_order(db, user.tenant_id, data, actor_id=user.id)
 
 
-@router.get("/{order_id}", response_model=OrderOut)
-async def get_order(order_id: uuid.UUID, db: DBSession, user: CurrentUser) -> OrderOut:
-    return await service.get_order(db, user.tenant_id, order_id)
+@router.get("/{order_id}", response_model=OrderDetailOut)
+async def get_order(order_id: uuid.UUID, db: DBSession, user: CurrentUser) -> OrderDetailOut:
+    order = await service.get_order(db, user.tenant_id, order_id)
+    events = await service.list_order_events(db, user.tenant_id, order_id)
+    data = OrderDetailOut.model_validate(order)
+    data.events = [OrderEventOut.model_validate(e) for e in events]
+    return data
+
+
+@router.post("/{order_id}/transition", response_model=OrderOut)
+async def transition_order(
+    order_id: uuid.UUID, data: OrderTransition, db: DBSession, user: CurrentUser
+) -> OrderOut:
+    """Advance an order through its lifecycle: confirmed -> dispatched ->
+    delivered -> completed (or cancel). Records who moved it and when."""
+    actor_name = getattr(user, "full_name", None) or getattr(user, "email", None)
+    return await service.transition_order(
+        db, user.tenant_id, order_id, data.to_status,
+        actor_id=user.id, actor_name=actor_name, note=data.note,
+    )
 
 
 # --- escalations (human review queue) ---

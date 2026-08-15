@@ -6,6 +6,7 @@ from app.db.models.inventory import Inventory
 from app.db.models.inventory_transaction import InventoryTransaction
 from app.db.models.message import Message
 from app.db.models.order import Order
+from app.db.models.order_event import OrderEvent
 from app.db.models.order_item import OrderItem
 from app.db.models.price_list import PriceList
 from app.db.models.print_job import PrintJob
@@ -16,6 +17,6 @@ from app.db.models.user import User
 
 __all__ = [
     "Tenant", "User", "Product", "PriceList", "ProductPrice",
-    "Inventory", "InventoryTransaction", "Order", "OrderItem",
+    "Inventory", "InventoryTransaction", "Order", "OrderItem", "OrderEvent",
     "Escalation", "PrintJob", "Conversation", "Message",
 ]

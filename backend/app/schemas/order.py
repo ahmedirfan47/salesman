@@ -26,7 +26,6 @@ class OrderItemOut(BaseModel):
     quantity: int
     unit_price: Decimal
     line_total: Decimal
-    available_at_order: int | None
 
 
 class OrderOut(BaseModel):
@@ -55,10 +54,27 @@ class EscalationOut(BaseModel):
     order_id: uuid.UUID | None
     customer_name: str | None
     status: str
-    resolution: str | None
-    created_at: datetime
 
 
 class ResolveEscalation(BaseModel):
     approve: bool
+    note: str | None = None
+
+
+class OrderEventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    from_status: str | None
+    to_status: str
+    actor_name: str | None
+    note: str | None
+    created_at: datetime
+
+
+class OrderDetailOut(OrderOut):
+    events: list[OrderEventOut] = []
+
+
+class OrderTransition(BaseModel):
+    to_status: str
     note: str | None = None
