@@ -23,7 +23,12 @@ class Settings(BaseSettings):
     # LLM (OpenAI-compatible endpoint; Ollama by default)
     LLM_BASE_URL: str = "http://localhost:11434/v1"
     LLM_MODEL: str = "qwen2.5"
-    LLM_API_KEY: str = "ollama"  # Ollama ignores this; real providers need a key
+    LLM_API_KEY: str = "ollama"
+
+    # WhatsApp (Meta Cloud API)
+    WHATSAPP_VERIFY_TOKEN: str = ""   # for the webhook GET challenge
+    WHATSAPP_APP_SECRET: str = ""     # for verifying POST signatures
+    WHATSAPP_API_BASE: str = "https://graph.facebook.com/v21.0"
 
     # CORS: comma-separated list of allowed origins (as a plain string to avoid
     # pydantic-settings JSON parsing). Access the parsed list via .cors_origins.
@@ -32,8 +37,6 @@ class Settings(BaseSettings):
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def _normalize_db_url(cls, v: str) -> str:
-        """Render/Railway give 'postgres://' or 'postgresql://'. We need the
-        async driver, so rewrite to 'postgresql+asyncpg://' when needed."""
         if isinstance(v, str):
             if v.startswith("postgres://"):
                 v = v.replace("postgres://", "postgresql+asyncpg://", 1)

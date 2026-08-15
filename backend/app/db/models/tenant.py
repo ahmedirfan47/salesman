@@ -16,5 +16,9 @@ class Tenant(UUIDPKMixin, TimestampMixin, Base):
     timezone: Mapped[str] = mapped_column(String(64), default="UTC", nullable=False)
     business_rules: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     settings: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    whatsapp_phone_number_id: Mapped[str | None] = mapped_column(
+        String(64), unique=True, index=True, nullable=True
+    )
+    whatsapp_access_token: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     users = relationship("User", back_populates="tenant", cascade="all, delete-orphan")
