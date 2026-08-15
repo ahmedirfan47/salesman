@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,8 +25,25 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "qwen2.5"
     LLM_API_KEY: str = "ollama"  # Ollama ignores this; real providers need a key
 
-    # CORS (JSON array in env, e.g. ["http://localhost:3000"])
-    CORS_ORIGINS: list[str] = ["http://localhost:3000"]
+    # CORS: comma-separated list of allowed origins (as a plain string to avoid
+    # pydantic-settings JSON parsing). Access the parsed list via .cors_origins.
+    CORS_ORIGINS: str = "http://localhost:3000"
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def _normalize_db_url(cls, v: str) -> str:
+        """Render/Railway give 'postgres://' or 'postgresql://'. We need the
+        async driver, so rewrite to 'postgresql+asyncpg://' when needed."""
+        if isinstance(v, str):
+            if v.startswith("postgres://"):
+                v = v.replace("postgres://", "postgresql+asyncpg://", 1)
+            elif v.startswith("postgresql://") and "+asyncpg" not in v:
+                v = v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 
 
 @lru_cache
