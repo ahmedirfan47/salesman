@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getToken } from "@/lib/api";
+import { MeProvider } from "@/lib/use-me";
 import Sidebar from "@/components/sidebar";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -20,9 +21,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (!ready) return null;
 
   return (
-    <div className="flex min-h-screen">
-      <Sidebar />
-      <main className="flex-1 overflow-auto p-8">{children}</main>
-    </div>
+    <MeProvider>
+      <div className="flex min-h-screen">
+        <Sidebar />
+        <main className="flex-1 overflow-auto p-8">{children}</main>
+      </div>
+    </MeProvider>
   );
 }

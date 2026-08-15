@@ -14,3 +14,19 @@ class UserOut(BaseModel):
     role: str
     is_active: bool
     created_at: datetime
+
+
+class MeOut(UserOut):
+    capabilities: list[str] = []
+
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: str
+    full_name: str | None = None
+    role: str = "salesman"
+
+
+class UserRoleUpdate(BaseModel):
+    role: str | None = None
+    is_active: bool | None = None

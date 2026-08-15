@@ -1,9 +1,9 @@
 import uuid
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.deps import CurrentUser, DBSession, require_role
-from app.core.enums import UserRole
+from app.core.deps import CurrentUser, DBSession, require_capability
+from app.core.permissions import Capability, has_capability
 from app.modules.orders import service
 from app.schemas.order import (
     EscalationOut,
@@ -23,7 +23,10 @@ async def list_orders(db: DBSession, user: CurrentUser) -> list[OrderOut]:
     return await service.list_orders(db, user.tenant_id)
 
 
-@router.post("", response_model=OrderOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", response_model=OrderOut, status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_capability(Capability.CREATE_ORDER))],
+)
 async def create_order(data: OrderCreate, db: DBSession, user: CurrentUser) -> OrderOut:
     """Create an order (cart). Confirms if all items are in stock, otherwise
     holds for human review and opens an escalation."""
@@ -39,12 +42,26 @@ async def get_order(order_id: uuid.UUID, db: DBSession, user: CurrentUser) -> Or
     return data
 
 
+_TRANSITION_CAPABILITY = {
+    "dispatched": Capability.DISPATCH_ORDER,
+    "delivered": Capability.DELIVER_ORDER,
+    "completed": Capability.COMPLETE_ORDER,
+    "cancelled": Capability.CANCEL_ORDER,
+}
+
+
 @router.post("/{order_id}/transition", response_model=OrderOut)
 async def transition_order(
     order_id: uuid.UUID, data: OrderTransition, db: DBSession, user: CurrentUser
 ) -> OrderOut:
     """Advance an order through its lifecycle: confirmed -> dispatched ->
-    delivered -> completed (or cancel). Records who moved it and when."""
+    delivered -> completed (or cancel). Gated by capability per target status."""
+    needed = _TRANSITION_CAPABILITY.get(data.to_status)
+    if needed and not has_capability(user.role, needed):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            f"Your role ('{user.role}') cannot move an order to '{data.to_status}'.",
+        )
     actor_name = getattr(user, "full_name", None) or getattr(user, "email", None)
     return await service.transition_order(
         db, user.tenant_id, order_id, data.to_status,
@@ -61,7 +78,7 @@ async def open_escalations(db: DBSession, user: CurrentUser) -> list[EscalationO
 @router.post(
     "/escalations/{escalation_id}/resolve",
     response_model=EscalationOut,
-    dependencies=[Depends(require_role(UserRole.ADMIN))],
+    dependencies=[Depends(require_capability(Capability.RESOLVE_ESCALATION))],
 )
 async def resolve_escalation(
     escalation_id: uuid.UUID,

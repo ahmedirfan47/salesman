@@ -7,6 +7,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import ROLE_HIERARCHY, UserRole
+from app.core.permissions import Capability, has_capability
 from app.core.security import decode_token
 from app.db.models.user import User
 from app.db.session import get_session
@@ -43,6 +44,20 @@ def require_role(minimum: UserRole):
     async def _checker(user: CurrentUser) -> User:
         if ROLE_HIERARCHY[UserRole(user.role)] < ROLE_HIERARCHY[minimum]:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Insufficient permissions")
+        return user
+
+    return _checker
+
+
+def require_capability(cap: Capability):
+    """Dependency factory enforcing that the user's role has a capability."""
+
+    async def _checker(user: CurrentUser) -> User:
+        if not has_capability(user.role, cap):
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                f"Your role ('{user.role}') cannot perform this action.",
+            )
         return user
 
     return _checker

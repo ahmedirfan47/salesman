@@ -68,3 +68,15 @@ export async function uploadFile(path: string, file: File) {
   }
   return res.json();
 }
+export type Me = {
+  id: string;
+  email: string;
+  full_name: string | null;
+  role: string;
+  is_active: boolean;
+  capabilities: string[];
+};
+
+export async function fetchMe(): Promise<Me> {
+  return api("/auth/me");
+}

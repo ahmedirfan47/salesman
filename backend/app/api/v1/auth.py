@@ -17,7 +17,7 @@ from app.schemas.auth import (
     RegisterRequest,
     TokenResponse,
 )
-from app.schemas.user import UserOut
+from app.schemas.user import MeOut, UserOut
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -56,6 +56,10 @@ async def refresh(data: RefreshRequest, db: DBSession) -> TokenResponse:
     return _tokens(user)
 
 
-@router.get("/me", response_model=UserOut)
-async def me(user: CurrentUser) -> User:
-    return user
+@router.get("/me", response_model=MeOut)
+async def me(user: CurrentUser) -> MeOut:
+    from app.core.permissions import capabilities_for
+
+    data = MeOut.model_validate(user)
+    data.capabilities = sorted(c.value for c in capabilities_for(user.role))
+    return data
