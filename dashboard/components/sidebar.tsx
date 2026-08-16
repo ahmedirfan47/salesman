@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, Package, Tag, ShoppingCart, AlertTriangle,
-  FileBarChart, Printer, MessageSquare, Users, MapPin, ClipboardList, Truck, LogOut,
+  FileBarChart, Printer, MessageSquare, Users, MapPin, ClipboardList, Truck, Contact, LogOut,
 } from "lucide-react";
 import { clearToken } from "@/lib/api";
 import { useMe, can } from "@/lib/use-me";
@@ -12,6 +12,7 @@ import { useMe, can } from "@/lib/use-me";
 const nav = [
   { href: "/overview", label: "Overview", icon: LayoutDashboard, cap: null },
   { href: "/products", label: "Products", icon: Package, cap: null },
+  { href: "/customers", label: "Customers", icon: Contact, cap: "manage_users" },
   { href: "/pricing", label: "Pricing", icon: Tag, cap: "manage_pricing" },
   { href: "/orders", label: "Orders", icon: ShoppingCart, cap: "view_orders" },
   { href: "/assignments", label: "Assignments", icon: ClipboardList, cap: "dispatch_order" },

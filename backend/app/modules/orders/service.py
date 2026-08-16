@@ -6,7 +6,7 @@ create_order():
     cannot oversell the last units
   - if every line has enough stock -> CONFIRM atomically:
         decrement inventory via the immutable ledger,
-        snapshot unit prices, set status='confirmed', queue a print slip
+        snapshot unit prices, set status='confirmed'
   - if any line is short -> status='requires_human_review' + create an
     Escalation row (no stock is touched). A human approves/rejects later.
 
@@ -64,6 +64,26 @@ async def create_order(
 ) -> Order:
     now = datetime.now(timezone.utc)
 
+    # 0. if the order is for a known customer, pull their details + zone so the
+    #    order is ready for (auto-)assignment. Explicit fields on the request win.
+    cust_zone_id = None
+    cust_name = data.customer_name
+    cust_company = data.customer_company
+    cust_whatsapp = data.whatsapp_number
+    if getattr(data, "customer_id", None):
+        from app.db.models.customer import Customer
+        customer = await db.scalar(
+            select(Customer).where(
+                Customer.id == data.customer_id, Customer.tenant_id == tenant_id
+            )
+        )
+        if not customer:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Customer not found")
+        cust_zone_id = customer.zone_id
+        cust_name = cust_name or customer.name
+        cust_company = cust_company or customer.company
+        cust_whatsapp = cust_whatsapp or customer.whatsapp_number
+
     # 1. resolve every line to product + current price, collecting shortfalls
     resolved: list[dict] = []
     shortfalls: list[dict] = []
@@ -105,9 +125,11 @@ async def create_order(
         order = Order(
             tenant_id=tenant_id,
             order_number=order_number,
-            customer_name=data.customer_name,
-            customer_company=data.customer_company,
-            whatsapp_number=data.whatsapp_number,
+            customer_id=getattr(data, "customer_id", None),
+            customer_name=cust_name,
+            customer_company=cust_company,
+            whatsapp_number=cust_whatsapp,
+            zone_id=cust_zone_id,
             status="requires_human_review",
             currency=resolved[0]["price"].currency,
             total_amount=Decimal("0"),
@@ -145,8 +167,8 @@ async def create_order(
                 context={"order_number": order_number, "shortfalls": shortfalls},
                 ai_recommendation=f"Insufficient stock -> {rec}. Approve partial/backorder or reject.",
                 order_id=order.id,
-                customer_name=data.customer_name,
-                whatsapp_number=data.whatsapp_number,
+                customer_name=cust_name,
+                whatsapp_number=cust_whatsapp,
                 status="open",
             )
         )
@@ -158,9 +180,11 @@ async def create_order(
     order = Order(
         tenant_id=tenant_id,
         order_number=order_number,
-        customer_name=data.customer_name,
-        customer_company=data.customer_company,
-        whatsapp_number=data.whatsapp_number,
+        customer_id=getattr(data, "customer_id", None),
+        customer_name=cust_name,
+        customer_company=cust_company,
+        whatsapp_number=cust_whatsapp,
+        zone_id=cust_zone_id,
         status="confirmed",
         currency=resolved[0]["price"].currency,
         price_list_id=resolved[0]["price"].price_list_id,

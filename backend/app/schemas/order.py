@@ -12,6 +12,7 @@ class OrderItemIn(BaseModel):
 
 class OrderCreate(BaseModel):
     items: list[OrderItemIn] = Field(min_length=1)
+    customer_id: uuid.UUID | None = None
     customer_name: str | None = None
     customer_company: str | None = None
     whatsapp_number: str | None = None
