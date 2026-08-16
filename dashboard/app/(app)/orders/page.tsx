@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
+import { OrderProgress } from "@/components/order-progress";
 
 type Order = {
   id: string;
@@ -16,16 +17,6 @@ type Order = {
   total_amount: string;
   currency: string;
   created_at: string;
-};
-
-const statusColor: Record<string, string> = {
-  confirmed: "bg-emerald-50 text-emerald-700",
-  dispatched: "bg-blue-50 text-blue-700",
-  delivered: "bg-indigo-50 text-indigo-700",
-  completed: "bg-emerald-100 text-emerald-800",
-  requires_human_review: "bg-amber-50 text-amber-700",
-  cancelled: "bg-red-50 text-red-700",
-  pending: "bg-gray-100 text-gray-600",
 };
 
 export default function OrdersPage() {
@@ -61,7 +52,7 @@ export default function OrdersPage() {
               <th className="px-4 py-3 font-medium">Order</th>
               <th className="px-4 py-3 font-medium">Customer</th>
               <th className="px-4 py-3 font-medium">Total</th>
-              <th className="px-4 py-3 font-medium">Status</th>
+              <th className="px-4 py-3 font-medium">Progress</th>
             </tr>
           </thead>
           <tbody>
@@ -74,11 +65,7 @@ export default function OrdersPage() {
                 <td className="px-4 py-3 font-mono text-xs">{o.order_number}</td>
                 <td className="px-4 py-3">{o.customer_name ?? "—"}</td>
                 <td className="px-4 py-3">{o.currency} {Number(o.total_amount).toLocaleString()}</td>
-                <td className="px-4 py-3">
-                  <span className={`rounded-full px-2 py-0.5 text-xs ${statusColor[o.status] ?? "bg-gray-100 text-gray-600"}`}>
-                    {o.status.replace(/_/g, " ")}
-                  </span>
-                </td>
+                <td className="px-4 py-3"><OrderProgress status={o.status} compact /></td>
               </tr>
             ))}
             {orders.length === 0 && !error && (

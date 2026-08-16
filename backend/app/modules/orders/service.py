@@ -245,7 +245,8 @@ async def create_order(
     await db.refresh(order)
 
     # AI auto-assignment: if the order has a zone with a covering driver, assign
-    # + dispatch automatically; otherwise it stays 'confirmed' for the dispatcher.
+    # a driver and move to 'preparing' (warehouse still packs it before dispatch);
+    # otherwise it stays 'confirmed' for the dispatcher.
     from app.modules.zones import service as zones_service
     await zones_service.auto_assign_order(db, tenant_id, order, actor_id=actor_id)
 
@@ -374,7 +375,8 @@ async def resolve_escalation(
 
 # who can move to what: current_status -> allowed next statuses
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
-    "confirmed": {"dispatched", "cancelled"},
+    "confirmed": {"preparing", "dispatched", "cancelled"},
+    "preparing": {"dispatched", "cancelled"},
     "dispatched": {"delivered", "cancelled"},
     "delivered": {"completed"},
 }

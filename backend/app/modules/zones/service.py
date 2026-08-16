@@ -3,7 +3,7 @@
 - zones: create/list delivery areas
 - driver<->zone links: which drivers cover which zones
 - suggestion: for an order's zone, propose the covering driver with the fewest
-  active (confirmed/dispatched) deliveries -- simple load balancing
+  active (confirmed/preparing/dispatched) deliveries -- simple load balancing
 - assignment: set an order's zone + driver
 """
 import uuid
@@ -17,7 +17,7 @@ from app.db.models.order_event import OrderEvent
 from app.db.models.user import User
 from app.db.models.zone import DriverZone, Zone
 
-_ACTIVE_STATUSES = ("confirmed", "dispatched")
+_ACTIVE_STATUSES = ("confirmed", "preparing", "dispatched")
 
 
 # --- zones ---
@@ -138,7 +138,7 @@ async def list_driver_orders(
         .where(
             Order.tenant_id == tenant_id,
             Order.assigned_driver_id == driver_id,
-            Order.status.in_(("dispatched", "delivered")),
+            Order.status.in_(("preparing", "dispatched", "delivered")),
         )
         .order_by(Order.created_at.desc())
     ))
@@ -148,24 +148,25 @@ async def auto_assign_order(
     db: AsyncSession, tenant_id: uuid.UUID, order: Order, *, actor_id: uuid.UUID | None = None
 ) -> User | None:
     """AI auto-assignment: if a confirmed order has a zone and a covering driver
-    exists, assign the best driver (fewest active deliveries) and dispatch it
-    automatically. Returns the driver, or None if it should fall to the
-    dispatcher queue (no zone, or no driver covers the zone)."""
+    exists, assign the best driver (fewest active deliveries) and move it to
+    'preparing' (the warehouse still packs it before dispatch). Returns the
+    driver, or None if it should fall to the dispatcher queue (no zone, or no
+    driver covers the zone)."""
     if order.status != "confirmed" or not order.zone_id:
         return None
     driver = await suggest_driver(db, tenant_id, order.zone_id)
     if not driver:
         return None
     order.assigned_driver_id = driver.id
-    order.status = "dispatched"
+    order.status = "preparing"
     db.add(OrderEvent(
         tenant_id=tenant_id,
         order_id=order.id,
         from_status="confirmed",
-        to_status="dispatched",
+        to_status="preparing",
         actor_id=actor_id,
         actor_name="Auto-assign (AI)",
-        note=f"Auto-assigned to {driver.full_name or driver.email}",
+        note=f"Auto-assigned to {driver.full_name or driver.email}; ready to prepare",
     ))
     await db.commit()
     await db.refresh(order)

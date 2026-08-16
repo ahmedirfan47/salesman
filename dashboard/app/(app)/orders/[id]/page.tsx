@@ -6,7 +6,8 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Truck, PackageCheck, CheckCircle2, XCircle } from "lucide-react";
+import { ArrowLeft, Truck, PackageCheck, CheckCircle2, XCircle, Package } from "lucide-react";
+import { OrderProgress } from "@/components/order-progress";
 
 type Item = { id: string; sku: string; product_name: string; quantity: number; unit_price: string; line_total: string };
 type Event = { from_status: string | null; to_status: string; actor_name: string | null; note: string | null; created_at: string };
@@ -18,6 +19,7 @@ type Order = {
 
 const statusColor: Record<string, string> = {
   confirmed: "bg-emerald-50 text-emerald-700",
+  preparing: "bg-violet-50 text-violet-700",
   dispatched: "bg-blue-50 text-blue-700",
   delivered: "bg-indigo-50 text-indigo-700",
   completed: "bg-emerald-100 text-emerald-800",
@@ -27,6 +29,11 @@ const statusColor: Record<string, string> = {
 
 const nextActions: Record<string, { to: string; label: string; icon: typeof Truck; variant?: "primary" | "danger" }[]> = {
   confirmed: [
+    { to: "preparing", label: "Start Preparing", icon: Package },
+    { to: "dispatched", label: "Mark Dispatched", icon: Truck },
+    { to: "cancelled", label: "Cancel", icon: XCircle, variant: "danger" },
+  ],
+  preparing: [
     { to: "dispatched", label: "Mark Dispatched", icon: Truck },
     { to: "cancelled", label: "Cancel", icon: XCircle, variant: "danger" },
   ],
@@ -97,6 +104,11 @@ export default function OrderDetailPage() {
 
       {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
 
+      <Card className="mb-6 p-6">
+        <OrderProgress status={order.status} />
+      </Card>
+
+      {/* action buttons */}
       {actions.length > 0 && (
         <div className="mb-6 flex gap-3">
           {actions.map((a) => (
@@ -108,6 +120,7 @@ export default function OrderDetailPage() {
         </div>
       )}
 
+      {/* items */}
       <Card className="mb-6 overflow-hidden">
         <table className="w-full text-sm">
           <thead className="border-b border-[var(--border)] bg-gray-50 text-left text-slate-500">
@@ -137,6 +150,7 @@ export default function OrderDetailPage() {
         </table>
       </Card>
 
+      {/* timeline */}
       <h2 className="mb-3 text-sm font-semibold text-slate-500">TIMELINE</h2>
       <Card className="p-5">
         <ol className="space-y-4">

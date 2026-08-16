@@ -16,6 +16,7 @@ class Capability(str, Enum):
     CREATE_ORDER = "create_order"
     VIEW_ORDERS = "view_orders"
     RESOLVE_ESCALATION = "resolve_escalation"
+    PREPARE_ORDER = "prepare_order"
     DISPATCH_ORDER = "dispatch_order"
     DELIVER_ORDER = "deliver_order"
     COMPLETE_ORDER = "complete_order"
@@ -38,6 +39,7 @@ ROLE_CAPABILITIES: dict[UserRole, set[Capability]] = {
     },
     UserRole.DISPATCHER: {
         Capability.VIEW_ORDERS,
+        Capability.PREPARE_ORDER,
         Capability.DISPATCH_ORDER,
         Capability.CANCEL_ORDER,
         Capability.VIEW_PRINTING,
@@ -50,6 +52,7 @@ ROLE_CAPABILITIES: dict[UserRole, set[Capability]] = {
     UserRole.WAREHOUSE: {
         Capability.VIEW_ORDERS,
         Capability.VIEW_PRINTING,
+        Capability.PREPARE_ORDER,
         Capability.DISPATCH_ORDER,
     },
     UserRole.VIEWER: {

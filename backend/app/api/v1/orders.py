@@ -43,6 +43,7 @@ async def get_order(order_id: uuid.UUID, db: DBSession, user: CurrentUser) -> Or
 
 
 _TRANSITION_CAPABILITY = {
+    "preparing": Capability.PREPARE_ORDER,
     "dispatched": Capability.DISPATCH_ORDER,
     "delivered": Capability.DELIVER_ORDER,
     "completed": Capability.COMPLETE_ORDER,
@@ -54,8 +55,9 @@ _TRANSITION_CAPABILITY = {
 async def transition_order(
     order_id: uuid.UUID, data: OrderTransition, db: DBSession, user: CurrentUser
 ) -> OrderOut:
-    """Advance an order through its lifecycle: confirmed -> dispatched ->
-    delivered -> completed (or cancel). Gated by capability per target status."""
+    """Advance an order through its lifecycle: confirmed -> preparing ->
+    dispatched -> delivered -> completed (or cancel). Gated by capability per
+    target status."""
     needed = _TRANSITION_CAPABILITY.get(data.to_status)
     if needed and not has_capability(user.role, needed):
         raise HTTPException(
