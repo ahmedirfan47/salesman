@@ -26,6 +26,7 @@ class OrderItemOut(BaseModel):
     quantity: int
     unit_price: Decimal
     line_total: Decimal
+    available_at_order: int | None
 
 
 class OrderOut(BaseModel):
@@ -41,6 +42,8 @@ class OrderOut(BaseModel):
     currency: str
     confirmed_at: datetime | None
     created_at: datetime
+    zone_id: uuid.UUID | None = None
+    assigned_driver_id: uuid.UUID | None = None
     items: list[OrderItemOut]
 
 
@@ -54,6 +57,8 @@ class EscalationOut(BaseModel):
     order_id: uuid.UUID | None
     customer_name: str | None
     status: str
+    resolution: str | None
+    created_at: datetime
 
 
 class ResolveEscalation(BaseModel):

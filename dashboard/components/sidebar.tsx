@@ -4,21 +4,23 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, Package, Tag, ShoppingCart, AlertTriangle,
-  FileBarChart, Printer, MessageSquare, Users, LogOut,
+  FileBarChart, Printer, MessageSquare, Users, MapPin, ClipboardList, Truck, LogOut,
 } from "lucide-react";
 import { clearToken } from "@/lib/api";
 import { useMe, can } from "@/lib/use-me";
 
-// each item lists the capability required to see it (null = everyone logged in)
 const nav = [
   { href: "/overview", label: "Overview", icon: LayoutDashboard, cap: null },
   { href: "/products", label: "Products", icon: Package, cap: null },
   { href: "/pricing", label: "Pricing", icon: Tag, cap: "manage_pricing" },
   { href: "/orders", label: "Orders", icon: ShoppingCart, cap: "view_orders" },
+  { href: "/assignments", label: "Assignments", icon: ClipboardList, cap: "dispatch_order" },
+  { href: "/deliveries", label: "My Deliveries", icon: Truck, cap: "deliver_order" },
   { href: "/escalations", label: "Escalations", icon: AlertTriangle, cap: "resolve_escalation" },
   { href: "/conversations", label: "Conversations", icon: MessageSquare, cap: "view_conversations" },
   { href: "/reports", label: "Reports", icon: FileBarChart, cap: "view_reports" },
   { href: "/printing", label: "Print Queue", icon: Printer, cap: "view_printing" },
+  { href: "/zones", label: "Zones", icon: MapPin, cap: "manage_users" },
   { href: "/admin", label: "Team & Access", icon: Users, cap: "manage_users" },
 ];
 

@@ -14,9 +14,10 @@ from app.db.models.product import Product
 from app.db.models.product_price import ProductPrice
 from app.db.models.tenant import Tenant
 from app.db.models.user import User
+from app.db.models.zone import DriverZone, Zone
 
 __all__ = [
     "Tenant", "User", "Product", "PriceList", "ProductPrice",
     "Inventory", "InventoryTransaction", "Order", "OrderItem", "OrderEvent",
-    "Escalation", "PrintJob", "Conversation", "Message",
+    "Escalation", "PrintJob", "Conversation", "Message", "Zone", "DriverZone",
 ]

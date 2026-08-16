@@ -39,6 +39,12 @@ class Order(UUIDPKMixin, TimestampMixin, Base):
 
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    zone_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("zones.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    assigned_driver_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     items = relationship(
         "OrderItem", back_populates="order", cascade="all, delete-orphan", lazy="selectin"
