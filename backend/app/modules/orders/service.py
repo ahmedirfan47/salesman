@@ -243,6 +243,12 @@ async def create_order(
     await printing_service.enqueue_for_order(db, tenant_id, order, slip_items)
     await db.commit()
     await db.refresh(order)
+
+    # AI auto-assignment: if the order has a zone with a covering driver, assign
+    # + dispatch automatically; otherwise it stays 'confirmed' for the dispatcher.
+    from app.modules.zones import service as zones_service
+    await zones_service.auto_assign_order(db, tenant_id, order, actor_id=actor_id)
+
     return order
 
 
@@ -345,6 +351,10 @@ async def resolve_escalation(
             for i in order.items
         ]
         await printing_service.enqueue_for_order(db, tenant_id, order, slip_items)
+        # auto-assign the now-confirmed order if possible
+        from app.modules.zones import service as zones_service
+        await db.flush()
+        await zones_service.auto_assign_order(db, tenant_id, order, actor_id=actor_id)
     elif order is not None:
         order.status = "cancelled"
         order.cancelled_at = now

@@ -13,12 +13,14 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.order import Order
+from app.db.models.order_event import OrderEvent
 from app.db.models.user import User
 from app.db.models.zone import DriverZone, Zone
 
 _ACTIVE_STATUSES = ("confirmed", "dispatched")
 
 
+# --- zones ---
 async def create_zone(db: AsyncSession, tenant_id: uuid.UUID, name: str, description: str | None) -> Zone:
     exists = await db.scalar(
         select(Zone).where(Zone.tenant_id == tenant_id, Zone.name == name)
@@ -46,6 +48,7 @@ async def delete_zone(db: AsyncSession, tenant_id: uuid.UUID, zone_id: uuid.UUID
     await db.commit()
 
 
+# --- driver <-> zone links ---
 async def set_driver_zones(
     db: AsyncSession, tenant_id: uuid.UUID, driver_id: uuid.UUID, zone_ids: list[uuid.UUID]
 ) -> None:
@@ -54,9 +57,11 @@ async def set_driver_zones(
     )
     if not driver:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Driver not found")
+    # clear existing
     existing = list(await db.scalars(select(DriverZone).where(DriverZone.driver_id == driver_id)))
     for dz in existing:
         await db.delete(dz)
+    # add new
     for zid in zone_ids:
         db.add(DriverZone(tenant_id=tenant_id, driver_id=driver_id, zone_id=zid))
     await db.commit()
@@ -98,6 +103,7 @@ async def suggest_driver(
     return scored[0][1]
 
 
+# --- order assignment ---
 async def assign_order(
     db: AsyncSession, tenant_id: uuid.UUID, order_id: uuid.UUID,
     zone_id: uuid.UUID | None, driver_id: uuid.UUID | None,
@@ -136,3 +142,31 @@ async def list_driver_orders(
         )
         .order_by(Order.created_at.desc())
     ))
+
+
+async def auto_assign_order(
+    db: AsyncSession, tenant_id: uuid.UUID, order: Order, *, actor_id: uuid.UUID | None = None
+) -> User | None:
+    """AI auto-assignment: if a confirmed order has a zone and a covering driver
+    exists, assign the best driver (fewest active deliveries) and dispatch it
+    automatically. Returns the driver, or None if it should fall to the
+    dispatcher queue (no zone, or no driver covers the zone)."""
+    if order.status != "confirmed" or not order.zone_id:
+        return None
+    driver = await suggest_driver(db, tenant_id, order.zone_id)
+    if not driver:
+        return None
+    order.assigned_driver_id = driver.id
+    order.status = "dispatched"
+    db.add(OrderEvent(
+        tenant_id=tenant_id,
+        order_id=order.id,
+        from_status="confirmed",
+        to_status="dispatched",
+        actor_id=actor_id,
+        actor_name="Auto-assign (AI)",
+        note=f"Auto-assigned to {driver.full_name or driver.email}",
+    ))
+    await db.commit()
+    await db.refresh(order)
+    return driver
