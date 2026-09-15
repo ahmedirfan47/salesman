@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -28,3 +28,10 @@ class Product(UUIDPKMixin, TimestampMixin, Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     category: Mapped[str | None] = mapped_column(String(120), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # What this product costs the business to acquire/produce -- separate
+    # from ProductPrice, which is what it's SOLD for. Optional: margin
+    # analytics report "unknown" rather than a misleading number until this
+    # is filled in for a given product.
+    cost_price: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    cost_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)

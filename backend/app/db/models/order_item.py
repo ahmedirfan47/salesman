@@ -30,6 +30,12 @@ class OrderItem(UUIDPKMixin, TimestampMixin, Base):
     unit_price: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
     line_total: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
 
+    # Cost SNAPSHOTTED at order time (mirrors unit_price above) -- so a later
+    # change to Product.cost_price never rewrites a past order's margin.
+    # Nullable: orders placed before this field existed, or for a product
+    # with no cost set, correctly have no cost data rather than a fake 0.
+    unit_cost: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+
     # what the item needed vs had, for the human-review case
     available_at_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
