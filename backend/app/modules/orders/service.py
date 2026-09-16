@@ -150,6 +150,7 @@ async def create_order(
                     product_name=e["product"].name_en,
                     quantity=e["quantity"],
                     unit_price=e["price"].unit_price,
+                    unit_cost=e["product"].cost_price,
                     line_total=line_total,
                     available_at_order=e["available"],
                 )
@@ -207,6 +208,7 @@ async def create_order(
                 product_name=e["product"].name_en,
                 quantity=e["quantity"],
                 unit_price=e["price"].unit_price,
+                unit_cost=e["product"].cost_price,
                 line_total=line_total,
                 available_at_order=e["available"],
             )

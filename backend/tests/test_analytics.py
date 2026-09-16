@@ -3,11 +3,13 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy import select
 
 from app.db.models.customer import Customer
 from app.db.models.order import Order
 from app.db.models.order_event import OrderEvent
 from app.db.models.order_item import OrderItem
+from app.db.models.product import Product
 from app.db.models.tenant import Tenant
 from app.modules.analytics.service import (
     drifting_customers,
@@ -23,10 +25,29 @@ def _ago(**kw):
 
 
 async def _tenant(db, name="Test Co"):
-    t = Tenant(name=name)
+    # slug must be unique + not null on the real Tenant model -- derive one
+    # from the name plus a short random suffix so multiple tenants created
+    # within the same test (e.g. "Mine" / "Theirs") never collide.
+    slug = f"{name.lower().replace(' ', '-')}-{uuid.uuid4().hex[:8]}"
+    t = Tenant(name=name, slug=slug)
     db.add(t)
     await db.flush()
     return t
+
+
+async def _product(db, tenant_id, *, sku="APPLE", name="Apples"):
+    """order_items.product_id is a real FK -- a product row must exist
+    first. Reuses an existing row for the same tenant+sku (the unique
+    constraint) instead of trying to insert a duplicate."""
+    existing = await db.scalar(
+        select(Product).where(Product.tenant_id == tenant_id, Product.sku == sku)
+    )
+    if existing:
+        return existing
+    p = Product(tenant_id=tenant_id, sku=sku, name_en=name)
+    db.add(p)
+    await db.flush()
+    return p
 
 
 async def _order(db, tenant_id, *, status="completed", created=None,
@@ -43,8 +64,9 @@ async def _order(db, tenant_id, *, status="completed", created=None,
 
 async def _item(db, tenant_id, order, *, sku="APPLE", name="Apples",
                 qty=10, price=100, cost=60):
+    product = await _product(db, tenant_id, sku=sku, name=name)
     it = OrderItem(
-        tenant_id=tenant_id, order_id=order.id, product_id=uuid.uuid4(),
+        tenant_id=tenant_id, order_id=order.id, product_id=product.id,
         sku=sku, product_name=name, quantity=qty,
         unit_price=price, line_total=price * qty, unit_cost=cost,
     )
