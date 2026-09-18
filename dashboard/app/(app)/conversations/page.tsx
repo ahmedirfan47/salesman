@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
-import { MessageSquare, Mic } from "lucide-react";
+import { MessageSquare, Mic, ArrowLeft } from "lucide-react";
 
 type Conversation = {
   id: string;
@@ -49,7 +49,8 @@ export default function ConversationsPage() {
       {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="overflow-hidden lg:col-span-1">
+        {/* List: hidden on mobile once a conversation is open */}
+        <Card className={`overflow-hidden lg:col-span-1 ${selected ? "hidden lg:block" : ""}`}>
           <div className="max-h-[70vh] overflow-y-auto">
             {convs.map((c) => (
               <button
@@ -74,16 +75,22 @@ export default function ConversationsPage() {
           </div>
         </Card>
 
-        <Card className="lg:col-span-2">
+        {/* Thread: hidden on mobile until a conversation is selected */}
+        <Card className={`lg:col-span-2 ${!selected ? "hidden lg:flex" : "flex"}`}>
           {!selected ? (
             <div className="flex h-full min-h-[300px] items-center justify-center text-sm text-slate-400">
               Select a conversation to view messages
             </div>
           ) : (
-            <div className="flex h-[70vh] flex-col">
-              <div className="border-b border-[var(--border)] px-5 py-3">
-                <div className="font-medium">{selected.customer_name || selected.customer_number}</div>
-                <div className="text-xs text-slate-500">{selected.customer_number}</div>
+            <div className="flex h-[70vh] w-full flex-col">
+              <div className="flex items-center gap-2 border-b border-[var(--border)] px-5 py-3">
+                <button onClick={() => setSelected(null)} className="text-slate-500 hover:text-slate-700 lg:hidden">
+                  <ArrowLeft size={18} />
+                </button>
+                <div>
+                  <div className="font-medium">{selected.customer_name || selected.customer_number}</div>
+                  <div className="text-xs text-slate-500">{selected.customer_number}</div>
+                </div>
               </div>
               <div className="flex-1 space-y-3 overflow-y-auto p-5">
                 {messages.map((m) => (

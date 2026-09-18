@@ -59,12 +59,12 @@ export default function DeliveriesPage() {
         <div className="mb-6 space-y-3">
           {active.map((o) => (
             <Card key={o.id} className="p-5">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <div className="flex items-center gap-2 font-medium"><MapPin size={16} className="text-[var(--primary)]" /> {o.customer_name ?? "—"}</div>
                   <div className="font-mono text-xs text-slate-500">{o.order_number} · {o.currency} {Number(o.total_amount).toLocaleString()}</div>
                 </div>
-                <Button disabled={busy === o.id} onClick={() => markDelivered(o.id)}>
+                <Button disabled={busy === o.id} onClick={() => markDelivered(o.id)} className="w-full sm:w-auto">
                   <PackageCheck size={16} /> Mark Delivered
                 </Button>
               </div>

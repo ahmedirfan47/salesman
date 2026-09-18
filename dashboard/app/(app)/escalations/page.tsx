@@ -55,9 +55,9 @@ export default function EscalationsPage() {
       <div className="space-y-3">
         {items.map((e) => (
           <Card key={e.id} className="p-5">
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
                     {e.reason_type.replace(/_/g, " ")}
                   </span>
@@ -66,10 +66,10 @@ export default function EscalationsPage() {
                 <p className="mt-2 text-sm text-slate-600">{e.ai_recommendation}</p>
               </div>
               <div className="flex shrink-0 gap-2">
-                <Button variant="outline" disabled={busy === e.id} onClick={() => resolve(e.id, false)}>
+                <Button variant="outline" className="flex-1 sm:flex-none" disabled={busy === e.id} onClick={() => resolve(e.id, false)}>
                   Reject
                 </Button>
-                <Button disabled={busy === e.id} onClick={() => resolve(e.id, true)}>
+                <Button className="flex-1 sm:flex-none" disabled={busy === e.id} onClick={() => resolve(e.id, true)}>
                   Approve
                 </Button>
               </div>

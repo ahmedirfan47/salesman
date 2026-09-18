@@ -11,7 +11,6 @@ const LABELS: Record<string, string> = {
   completed: "Completed",
 };
 
-// special statuses that sit outside the happy path
 const OFFPATH: Record<string, { label: string; color: string }> = {
   cancelled: { label: "Cancelled", color: "text-red-600 bg-red-50" },
   requires_human_review: { label: "Needs review", color: "text-amber-700 bg-amber-50" },
@@ -26,7 +25,6 @@ export function OrderProgress({ status, compact = false }: { status: string; com
   const currentIndex = STAGES.indexOf(status as (typeof STAGES)[number]);
 
   if (compact) {
-    // small dotted progress for table rows
     return (
       <div className="flex items-center gap-1">
         {STAGES.map((stage, i) => {
@@ -48,9 +46,30 @@ export function OrderProgress({ status, compact = false }: { status: string; com
     );
   }
 
-  // full stepper for the detail page
-  return (
-    <div className="flex items-center">
+  // Mobile: a "Step X of Y" summary + a single progress bar. A 5-node
+  // labeled stepper cannot fit a phone width without either truncating
+  // labels or forcing horizontal scroll -- both worse than this pattern,
+  // which is how most mobile checkout/status flows handle it.
+  const mobileView = (
+    <div className="sm:hidden">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-sm font-semibold text-slate-700">{LABELS[status] ?? status}</span>
+        <span className="text-xs text-slate-400">
+          Step {currentIndex + 1} of {STAGES.length}
+        </span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
+        <div
+          className="h-full rounded-full bg-[var(--primary)] transition-all"
+          style={{ width: `${((currentIndex + 1) / STAGES.length) * 100}%` }}
+        />
+      </div>
+    </div>
+  );
+
+  // Desktop/tablet: the full labeled stepper.
+  const desktopView = (
+    <div className="hidden sm:flex sm:items-center">
       {STAGES.map((stage, i) => {
         const done = i < currentIndex;
         const current = i === currentIndex;
@@ -76,6 +95,13 @@ export function OrderProgress({ status, compact = false }: { status: string; com
           </div>
         );
       })}
+    </div>
+  );
+
+  return (
+    <div>
+      {mobileView}
+      {desktopView}
     </div>
   );
 }

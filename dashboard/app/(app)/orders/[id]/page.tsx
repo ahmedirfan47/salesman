@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Truck, PackageCheck, CheckCircle2, XCircle, Package } from "lucide-react";
 import { OrderProgress } from "@/components/order-progress";
+import { TableScroll } from "@/components/table-scroll";
 
 type Item = { id: string; sku: string; product_name: string; quantity: number; unit_price: string; line_total: string };
 type Event = { from_status: string | null; to_status: string; actor_name: string | null; note: string | null; created_at: string };
@@ -92,12 +93,12 @@ export default function OrderDetailPage() {
         <ArrowLeft size={16} /> Back to Orders
       </Link>
 
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">{order.order_number}</h1>
           <p className="text-sm text-slate-500">{order.customer_name ?? "—"}</p>
         </div>
-        <span className={`rounded-full px-3 py-1 text-sm font-medium ${statusColor[order.status] ?? "bg-gray-100"}`}>
+        <span className={`w-fit rounded-full px-3 py-1 text-sm font-medium ${statusColor[order.status] ?? "bg-gray-100"}`}>
           {order.status.replace(/_/g, " ")}
         </span>
       </div>
@@ -110,9 +111,9 @@ export default function OrderDetailPage() {
 
       {/* action buttons */}
       {actions.length > 0 && (
-        <div className="mb-6 flex gap-3">
+        <div className="mb-6 flex flex-wrap gap-3">
           {actions.map((a) => (
-            <Button key={a.to} variant={a.variant ?? "primary"} disabled={busy} onClick={() => transition(a.to)}>
+            <Button key={a.to} variant={a.variant ?? "primary"} disabled={busy} onClick={() => transition(a.to)} className="flex-1 sm:flex-none">
               <a.icon size={16} />
               {a.label}
             </Button>
@@ -122,32 +123,34 @@ export default function OrderDetailPage() {
 
       {/* items */}
       <Card className="mb-6 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="border-b border-[var(--border)] bg-gray-50 text-left text-slate-500">
-            <tr>
-              <th className="px-4 py-3 font-medium">Product</th>
-              <th className="px-4 py-3 font-medium text-right">Qty</th>
-              <th className="px-4 py-3 font-medium text-right">Unit</th>
-              <th className="px-4 py-3 font-medium text-right">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {order.items.map((it) => (
-              <tr key={it.id} className="border-b border-[var(--border)] last:border-0">
-                <td className="px-4 py-3">{it.product_name} <span className="text-xs text-slate-400">({it.sku})</span></td>
-                <td className="px-4 py-3 text-right">{it.quantity}</td>
-                <td className="px-4 py-3 text-right">{Number(it.unit_price).toLocaleString()}</td>
-                <td className="px-4 py-3 text-right">{Number(it.line_total).toLocaleString()}</td>
+        <TableScroll>
+          <table className="w-full min-w-[500px] text-sm">
+            <thead className="border-b border-[var(--border)] bg-gray-50 text-left text-slate-500">
+              <tr>
+                <th className="px-4 py-3 font-medium">Product</th>
+                <th className="px-4 py-3 font-medium text-right">Qty</th>
+                <th className="px-4 py-3 font-medium text-right">Unit</th>
+                <th className="px-4 py-3 font-medium text-right">Total</th>
               </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr className="font-semibold">
-              <td className="px-4 py-3" colSpan={3}>Total</td>
-              <td className="px-4 py-3 text-right">{order.currency} {Number(order.total_amount).toLocaleString()}</td>
-            </tr>
-          </tfoot>
-        </table>
+            </thead>
+            <tbody>
+              {order.items.map((it) => (
+                <tr key={it.id} className="border-b border-[var(--border)] last:border-0">
+                  <td className="px-4 py-3">{it.product_name} <span className="text-xs text-slate-400">({it.sku})</span></td>
+                  <td className="px-4 py-3 text-right">{it.quantity}</td>
+                  <td className="px-4 py-3 text-right">{Number(it.unit_price).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-right">{Number(it.line_total).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="font-semibold">
+                <td className="px-4 py-3" colSpan={3}>Total</td>
+                <td className="px-4 py-3 text-right">{order.currency} {Number(order.total_amount).toLocaleString()}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </TableScroll>
       </Card>
 
       {/* timeline */}
