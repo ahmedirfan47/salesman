@@ -1,20 +1,60 @@
+import { useState } from "react";
+import { View, ActivityIndicator, StyleSheet } from "react-native";
 import { StatusBar } from "expo-status-bar";
+import { AuthProvider, useAuth } from "./src/lib/auth-context";
 import { SubscriptionScreen } from "./src/screens/SubscriptionScreen";
+import { LoginScreen } from "./src/screens/LoginScreen";
+import { HomeScreen } from "./src/screens/HomeScreen";
+import { colors } from "./src/theme/theme";
+
+type PreAuthScreen = "subscription" | "login";
+
+/**
+ * Root navigator. No routing library -- the app only ever has a handful of
+ * top-level states, so a simple switch is clearer than the overhead of a
+ * navigation stack: loading -> (subscription | login) -> home.
+ */
+function RootNavigator() {
+  const { me, loading } = useAuth();
+  const [preAuthScreen, setPreAuthScreen] = useState<PreAuthScreen>("subscription");
+
+  if (loading) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator color={colors.accent} size="large" />
+      </View>
+    );
+  }
+
+  if (!me) {
+    if (preAuthScreen === "login") {
+      return <LoginScreen onBack={() => setPreAuthScreen("subscription")} />;
+    }
+    return (
+      <SubscriptionScreen
+        onContinue={(planId, period) => {
+          // Selecting a plan here doesn't create an account -- accounts on
+          // this app are created by an admin via the web dashboard's Team &
+          // Access page. This just gets the visitor to sign-in.
+          setPreAuthScreen("login");
+        }}
+        onSignIn={() => setPreAuthScreen("login")}
+      />
+    );
+  }
+
+  return <HomeScreen />;
+}
 
 export default function App() {
   return (
-    <>
+    <AuthProvider>
       <StatusBar style="dark" />
-      <SubscriptionScreen
-        onContinue={(planId, period) => {
-          // TODO(billing): route to the real checkout flow once payments exist.
-          console.log("Selected plan:", planId, "billed", period);
-        }}
-        onSignIn={() => {
-          // TODO(auth): navigate to the sign-in screen.
-          console.log("Sign in tapped");
-        }}
-      />
-    </>
+      <RootNavigator />
+    </AuthProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  centered: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg },
+});

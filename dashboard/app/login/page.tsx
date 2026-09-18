@@ -1,3 +1,4 @@
+//dashboard\app\login\page.tsx
 "use client";
 
 import { useState } from "react";
@@ -6,7 +7,7 @@ import { login } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-
+import Link from "next/link";
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -63,6 +64,12 @@ export default function LoginPage() {
             {loading ? "Signing in…" : "Sign in"}
           </Button>
         </form>
+                <p className="mt-6 text-center text-sm text-slate-500">
+          New here?{" "}
+          <Link href="/signup" className="font-medium text-[var(--primary)] hover:underline">
+            Create an account
+          </Link>
+        </p>
       </Card>
     </div>
   );

@@ -32,7 +32,7 @@ export default function PublicPlansPage() {
 
         <div className="mt-10 grid grid-cols-1 gap-6 lg:grid-cols-3">
           {plans.map((plan) => (
-            <PlanCard key={plan.id} plan={plan} period={period} actionHref="/login" />
+            <PlanCard key={plan.id} plan={plan} period={period} actionHref="/signup" />
           ))}
         </div>
       </div>

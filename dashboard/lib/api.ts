@@ -1,3 +1,4 @@
+//dashboard\lib\api.ts
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export function getToken(): string | null {
@@ -79,4 +80,18 @@ export type Me = {
 
 export async function fetchMe(): Promise<Me> {
   return api("/auth/me");
+}
+export async function register(tenant_name: string, email: string, password: string) {
+  const res = await fetch(`${API_BASE}/api/v1/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tenant_name, email, password }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || "Registration failed");
+  }
+  const data = await res.json();
+  setToken(data.access_token);
+  return data;
 }
