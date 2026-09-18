@@ -5,6 +5,7 @@ import { api, uploadFile } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Upload, CheckCircle2, FileSpreadsheet } from "lucide-react";
+import { TableScroll } from "@/components/table-scroll";
 
 type PriceList = {
   id: string;
@@ -74,8 +75,8 @@ export default function PricingPage() {
       <p className="mb-6 text-sm text-slate-500">Upload your daily price sheet (.xlsx)</p>
 
       <Card className="mb-6 p-6">
-        <div className="flex items-center gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-indigo-50 text-[var(--primary)]">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-[var(--primary)]">
             <FileSpreadsheet size={24} />
           </div>
           <div className="flex-1">
@@ -92,7 +93,7 @@ export default function PricingPage() {
             className="hidden"
             id="file-upload"
           />
-          <Button disabled={busy} onClick={() => fileRef.current?.click()}>
+          <Button disabled={busy} onClick={() => fileRef.current?.click()} className="w-full sm:w-auto">
             <Upload size={16} />
             {busy ? "Uploading…" : "Choose file"}
           </Button>
@@ -103,44 +104,46 @@ export default function PricingPage() {
 
       <h2 className="mb-3 text-sm font-semibold text-slate-500">VERSION HISTORY</h2>
       <Card className="overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="border-b border-[var(--border)] bg-gray-50 text-left text-slate-500">
-            <tr>
-              <th className="px-4 py-3 font-medium">Version</th>
-              <th className="px-4 py-3 font-medium">File</th>
-              <th className="px-4 py-3 font-medium">Status</th>
-              <th className="px-4 py-3 font-medium">Uploaded</th>
-              <th className="px-4 py-3 font-medium"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {lists.map((pl) => (
-              <tr key={pl.id} className="border-b border-[var(--border)] last:border-0">
-                <td className="px-4 py-3 font-mono">v{pl.version}</td>
-                <td className="px-4 py-3">{pl.source_filename ?? "—"}</td>
-                <td className="px-4 py-3">
-                  <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${statusColor[pl.status] ?? "bg-gray-100"}`}>
-                    {pl.status === "active" && <CheckCircle2 size={12} />}
-                    {pl.status}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-slate-500">
-                  {new Date(pl.created_at).toLocaleString()}
-                </td>
-                <td className="px-4 py-3 text-right">
-                  {pl.status === "pending" && (
-                    <Button disabled={busy} onClick={() => activate(pl.id)}>
-                      Activate
-                    </Button>
-                  )}
-                </td>
+        <TableScroll>
+          <table className="w-full min-w-[640px] text-sm">
+            <thead className="border-b border-[var(--border)] bg-gray-50 text-left text-slate-500">
+              <tr>
+                <th className="px-4 py-3 font-medium">Version</th>
+                <th className="px-4 py-3 font-medium">File</th>
+                <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium">Uploaded</th>
+                <th className="px-4 py-3 font-medium"></th>
               </tr>
-            ))}
-            {lists.length === 0 && !error && (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">No price lists yet</td></tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {lists.map((pl) => (
+                <tr key={pl.id} className="border-b border-[var(--border)] last:border-0">
+                  <td className="px-4 py-3 font-mono">v{pl.version}</td>
+                  <td className="px-4 py-3">{pl.source_filename ?? "—"}</td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${statusColor[pl.status] ?? "bg-gray-100"}`}>
+                      {pl.status === "active" && <CheckCircle2 size={12} />}
+                      {pl.status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-slate-500">
+                    {new Date(pl.created_at).toLocaleString()}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {pl.status === "pending" && (
+                      <Button disabled={busy} onClick={() => activate(pl.id)}>
+                        Activate
+                      </Button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {lists.length === 0 && !error && (
+                <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">No price lists yet</td></tr>
+              )}
+            </tbody>
+          </table>
+        </TableScroll>
       </Card>
     </div>
   );

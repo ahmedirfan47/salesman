@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { UserPlus, ShieldAlert } from "lucide-react";
+import { TableScroll } from "@/components/table-scroll";
 
 type User = {
   id: string; email: string; full_name: string | null;
@@ -104,51 +105,53 @@ export default function AdminPage() {
       </Card>
 
       <Card className="overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="border-b border-[var(--border)] bg-gray-50 text-left text-slate-500">
-            <tr>
-              <th className="px-4 py-3 font-medium">Name</th>
-              <th className="px-4 py-3 font-medium">Email</th>
-              <th className="px-4 py-3 font-medium">Role</th>
-              <th className="px-4 py-3 font-medium">Status</th>
-              <th className="px-4 py-3 font-medium"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((u) => {
-              const isOwner = u.role === "owner";
-              const isSelf = u.id === me?.id;
-              return (
-                <tr key={u.id} className="border-b border-[var(--border)] last:border-0">
-                  <td className="px-4 py-3">{u.full_name ?? "—"}{isSelf && <span className="ml-2 text-xs text-slate-400">(you)</span>}</td>
-                  <td className="px-4 py-3 text-slate-600">{u.email}</td>
-                  <td className="px-4 py-3">
-                    {isOwner ? (
-                      <span className={`rounded-full px-2 py-0.5 text-xs ${roleColor.owner}`}>owner</span>
-                    ) : (
-                      <select value={u.role} onChange={(e) => changeRole(u.id, e.target.value)}
-                        className={`rounded-full px-2 py-1 text-xs ${roleColor[u.role] ?? "bg-gray-100"}`}>
-                        {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
-                      </select>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`rounded-full px-2 py-0.5 text-xs ${u.is_active ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
-                      {u.is_active ? "Active" : "Disabled"}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    {!isOwner && !isSelf && (
-                      <Button variant="outline" onClick={() => toggleActive(u.id, !u.is_active)}>
-                        {u.is_active ? "Disable" : "Enable"}
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <TableScroll>
+          <table className="w-full min-w-[680px] text-sm">
+            <thead className="border-b border-[var(--border)] bg-gray-50 text-left text-slate-500">
+              <tr>
+                <th className="px-4 py-3 font-medium">Name</th>
+                <th className="px-4 py-3 font-medium">Email</th>
+                <th className="px-4 py-3 font-medium">Role</th>
+                <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((u) => {
+                const isOwner = u.role === "owner";
+                const isSelf = u.id === me?.id;
+                return (
+                  <tr key={u.id} className="border-b border-[var(--border)] last:border-0">
+                    <td className="px-4 py-3">{u.full_name ?? "—"}{isSelf && <span className="ml-2 text-xs text-slate-400">(you)</span>}</td>
+                    <td className="px-4 py-3 text-slate-600">{u.email}</td>
+                    <td className="px-4 py-3">
+                      {isOwner ? (
+                        <span className={`rounded-full px-2 py-0.5 text-xs ${roleColor.owner}`}>owner</span>
+                      ) : (
+                        <select value={u.role} onChange={(e) => changeRole(u.id, e.target.value)}
+                          className={`rounded-full px-2 py-1 text-xs ${roleColor[u.role] ?? "bg-gray-100"}`}>
+                          {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                        </select>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`rounded-full px-2 py-0.5 text-xs ${u.is_active ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
+                        {u.is_active ? "Active" : "Disabled"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {!isOwner && !isSelf && (
+                        <Button variant="outline" onClick={() => toggleActive(u.id, !u.is_active)}>
+                          {u.is_active ? "Disable" : "Enable"}
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </TableScroll>
       </Card>
     </div>
   );

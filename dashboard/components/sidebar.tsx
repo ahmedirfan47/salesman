@@ -1,15 +1,15 @@
 "use client";
 
-
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, Package, Tag, ShoppingCart, AlertTriangle,
-  FileBarChart, Printer, MessageSquare, Users, MapPin, ClipboardList, Truck, Contact, LogOut,
+  FileBarChart, Printer, MessageSquare, Users, MapPin, ClipboardList,
+  Truck, Contact, CreditCard, LogOut, Menu, X,
 } from "lucide-react";
 import { clearToken } from "@/lib/api";
 import { useMe, can } from "@/lib/use-me";
-
 
 const nav = [
   { href: "/overview", label: "Overview", icon: LayoutDashboard, cap: null },
@@ -24,50 +24,114 @@ const nav = [
   { href: "/reports", label: "Reports", icon: FileBarChart, cap: "view_reports" },
   { href: "/printing", label: "Print Queue", icon: Printer, cap: "view_printing" },
   { href: "/zones", label: "Zones", icon: MapPin, cap: "manage_users" },
+  { href: "/billing", label: "Billing & Plan", icon: CreditCard, cap: "manage_users" },
   { href: "/admin", label: "Team & Access", icon: Users, cap: "manage_users" },
 ];
 
-export default function Sidebar() {
+function NavList({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
+  const { me } = useMe();
+  const visible = nav.filter((n) => n.cap === null || can(me, n.cap));
+
+  return (
+    <nav className="flex-1 space-y-1 px-3">
+      {visible.map(({ href, label, icon: Icon }) => {
+        const active = pathname.startsWith(href);
+        return (
+          <Link
+            key={href}
+            href={href}
+            onClick={onNavigate}
+            className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
+              active ? "bg-indigo-50 text-[var(--primary)]" : "text-slate-600 hover:bg-gray-100"
+            }`}
+          >
+            <Icon size={18} />
+            {label}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
+export default function Sidebar() {
   const router = useRouter();
   const { me } = useMe();
+  const [open, setOpen] = useState(false);
 
   function logout() {
     clearToken();
     router.replace("/login");
   }
 
-  const visible = nav.filter((n) => n.cap === null || can(me, n.cap));
+  const brand = (
+    <div className="text-lg font-bold tracking-tight text-slate-900">
+      Salesman<span className="text-[var(--primary)]">.</span>
+    </div>
+  );
+
+  const userLine = me && (
+    <div className="px-6 pb-2 text-xs text-slate-400">
+      {me.full_name || me.email} · <span className="capitalize">{me.role}</span>
+    </div>
+  );
 
   return (
-    <aside className="flex w-60 flex-col border-r border-[var(--border)] bg-white">
-      <div className="px-6 py-5 text-lg font-bold tracking-tight">
-        Salesman<span className="text-[var(--primary)]">.</span>
+    <>
+      {/* Mobile top bar -- shown below md, replaces the fixed sidebar */}
+      <div className="sticky top-0 z-40 flex h-14 items-center justify-between border-b border-[var(--border)] bg-white px-4 md:hidden">
+        <Link href="/overview" className="text-base font-bold tracking-tight text-slate-900">
+          Salesman<span className="text-[var(--primary)]">.</span>
+        </Link>
+        <button
+          onClick={() => setOpen(true)}
+          aria-label="Open menu"
+          className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 hover:bg-gray-100"
+        >
+          <Menu size={22} />
+        </button>
       </div>
-      {me && (
-        <div className="mb-2 px-6 text-xs text-slate-400">
-          {me.full_name || me.email} · <span className="capitalize">{me.role}</span>
+
+      {/* Desktop sidebar -- fixed column, always visible at md and up */}
+      <aside className="hidden w-60 shrink-0 flex-col border-r border-[var(--border)] bg-white md:flex">
+        <div className="px-6 py-5">{brand}</div>
+        {userLine}
+        <NavList />
+        <button
+          onClick={logout}
+          className="m-3 flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-gray-100"
+        >
+          <LogOut size={18} /> Sign out
+        </button>
+      </aside>
+
+      {/* Mobile drawer -- slides in below md */}
+      {open && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <div className="absolute inset-0 bg-black/30" onClick={() => setOpen(false)} aria-hidden />
+          <div className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col bg-white shadow-xl">
+            <div className="flex items-center justify-between px-6 py-5">
+              {brand}
+              <button
+                onClick={() => setOpen(false)}
+                aria-label="Close menu"
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 hover:bg-gray-100"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            {userLine}
+            <NavList onNavigate={() => setOpen(false)} />
+            <button
+              onClick={() => { setOpen(false); logout(); }}
+              className="m-3 flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-gray-100"
+            >
+              <LogOut size={18} /> Sign out
+            </button>
+          </div>
         </div>
       )}
-      <nav className="flex-1 space-y-1 px-3">
-        {visible.map(({ href, label, icon: Icon }) => {
-          const active = pathname.startsWith(href);
-          return (
-            <Link key={href} href={href}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                active ? "bg-indigo-50 text-[var(--primary)]" : "text-slate-600 hover:bg-gray-100"
-              }`}>
-              <Icon size={18} />
-              {label}
-            </Link>
-          );
-        })}
-      </nav>
-      <button onClick={logout}
-        className="m-3 flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-gray-100">
-        <LogOut size={18} />
-        Sign out
-      </button>
-    </aside>
+    </>
   );
 }

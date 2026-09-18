@@ -5,6 +5,7 @@ import { api, getToken } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Printer, FileText } from "lucide-react";
+import { TableScroll } from "@/components/table-scroll";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -49,47 +50,49 @@ export default function PrintingPage() {
       {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
 
       <Card className="overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="border-b border-[var(--border)] bg-gray-50 text-left text-slate-500">
-            <tr>
-              <th className="px-4 py-3 font-medium">Order</th>
-              <th className="px-4 py-3 font-medium">Customer</th>
-              <th className="px-4 py-3 font-medium">Total</th>
-              <th className="px-4 py-3 font-medium">Status</th>
-              <th className="px-4 py-3 font-medium"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {jobs.map((j) => (
-              <tr key={j.id} className="border-b border-[var(--border)] last:border-0">
-                <td className="px-4 py-3 font-mono text-xs">{j.payload.order_number ?? "—"}</td>
-                <td className="px-4 py-3">{j.payload.customer_name ?? "—"}</td>
-                <td className="px-4 py-3">
-                  {j.payload.currency} {j.payload.total_amount?.toLocaleString() ?? ""}
-                </td>
-                <td className="px-4 py-3">
-                  <span className={`rounded-full px-2 py-0.5 text-xs ${statusColor[j.status] ?? "bg-gray-100"}`}>
-                    {j.status}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <Button variant="outline" onClick={() => viewSlip(j.id)}>
-                    <FileText size={14} />
-                    Slip
-                  </Button>
-                </td>
-              </tr>
-            ))}
-            {jobs.length === 0 && !error && (
+        <TableScroll>
+          <table className="w-full min-w-[640px] text-sm">
+            <thead className="border-b border-[var(--border)] bg-gray-50 text-left text-slate-500">
               <tr>
-                <td colSpan={5} className="px-4 py-10 text-center text-slate-400">
-                  <Printer size={24} className="mx-auto mb-2 opacity-40" />
-                  No print jobs yet
-                </td>
+                <th className="px-4 py-3 font-medium">Order</th>
+                <th className="px-4 py-3 font-medium">Customer</th>
+                <th className="px-4 py-3 font-medium">Total</th>
+                <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium"></th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {jobs.map((j) => (
+                <tr key={j.id} className="border-b border-[var(--border)] last:border-0">
+                  <td className="px-4 py-3 font-mono text-xs">{j.payload.order_number ?? "—"}</td>
+                  <td className="px-4 py-3">{j.payload.customer_name ?? "—"}</td>
+                  <td className="px-4 py-3">
+                    {j.payload.currency} {j.payload.total_amount?.toLocaleString() ?? ""}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`rounded-full px-2 py-0.5 text-xs ${statusColor[j.status] ?? "bg-gray-100"}`}>
+                      {j.status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <Button variant="outline" onClick={() => viewSlip(j.id)}>
+                      <FileText size={14} />
+                      Slip
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+              {jobs.length === 0 && !error && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-10 text-center text-slate-400">
+                    <Printer size={24} className="mx-auto mb-2 opacity-40" />
+                    No print jobs yet
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </TableScroll>
       </Card>
     </div>
   );

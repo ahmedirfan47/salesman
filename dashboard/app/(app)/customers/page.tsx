@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ShieldAlert, UserPlus } from "lucide-react";
+import { TableScroll } from "@/components/table-scroll";
 
 type Zone = { id: string; name: string };
 type Customer = {
@@ -41,8 +42,6 @@ export default function CustomersPage() {
       </Card>
     );
   }
-
-  const zoneName = (id: string | null) => zones.find((z) => z.id === id)?.name ?? "—";
 
   async function addCustomer() {
     if (!form.name.trim()) return;
@@ -99,35 +98,37 @@ export default function CustomersPage() {
       </Card>
 
       <Card className="overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="border-b border-[var(--border)] bg-gray-50 text-left text-slate-500">
-            <tr>
-              <th className="px-4 py-3 font-medium">Name</th>
-              <th className="px-4 py-3 font-medium">Company</th>
-              <th className="px-4 py-3 font-medium">WhatsApp</th>
-              <th className="px-4 py-3 font-medium">Zone</th>
-            </tr>
-          </thead>
-          <tbody>
-            {customers.map((c) => (
-              <tr key={c.id} className="border-b border-[var(--border)] last:border-0">
-                <td className="px-4 py-3 font-medium">{c.name}</td>
-                <td className="px-4 py-3 text-slate-600">{c.company ?? "—"}</td>
-                <td className="px-4 py-3 text-slate-600">{c.whatsapp_number ?? "—"}</td>
-                <td className="px-4 py-3">
-                  <select value={c.zone_id ?? ""} onChange={(e) => changeZone(c.id, e.target.value)}
-                    className="rounded-lg border border-[var(--border)] bg-white px-2 py-1 text-xs">
-                    <option value="">No zone</option>
-                    {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
-                  </select>
-                </td>
+        <TableScroll>
+          <table className="w-full min-w-[600px] text-sm">
+            <thead className="border-b border-[var(--border)] bg-gray-50 text-left text-slate-500">
+              <tr>
+                <th className="px-4 py-3 font-medium">Name</th>
+                <th className="px-4 py-3 font-medium">Company</th>
+                <th className="px-4 py-3 font-medium">WhatsApp</th>
+                <th className="px-4 py-3 font-medium">Zone</th>
               </tr>
-            ))}
-            {customers.length === 0 && !error && (
-              <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-400">No customers yet</td></tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {customers.map((c) => (
+                <tr key={c.id} className="border-b border-[var(--border)] last:border-0">
+                  <td className="px-4 py-3 font-medium">{c.name}</td>
+                  <td className="px-4 py-3 text-slate-600">{c.company ?? "—"}</td>
+                  <td className="px-4 py-3 text-slate-600">{c.whatsapp_number ?? "—"}</td>
+                  <td className="px-4 py-3">
+                    <select value={c.zone_id ?? ""} onChange={(e) => changeZone(c.id, e.target.value)}
+                      className="rounded-lg border border-[var(--border)] bg-white px-2 py-1 text-xs">
+                      <option value="">No zone</option>
+                      {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
+                    </select>
+                  </td>
+                </tr>
+              ))}
+              {customers.length === 0 && !error && (
+                <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-400">No customers yet</td></tr>
+              )}
+            </tbody>
+          </table>
+        </TableScroll>
       </Card>
     </div>
   );
