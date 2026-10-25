@@ -34,6 +34,7 @@ from app.db.models.price_list import PriceList
 from app.db.models.print_job import PrintJob
 from app.db.models.product import Product
 from app.db.models.product_price import ProductPrice
+from app.db.models.prospect import Prospect, ProspectActivity
 from app.db.models.tenant import Tenant
 from app.db.models.user import User
 from app.db.models.zone import DriverZone, Zone
@@ -75,9 +76,9 @@ async def _wipe(db: AsyncSession) -> None:
         return
     tid = tenant.id
     # children first (some FKs are RESTRICT), then the tenant
-    for model in (Job, Message, Conversation, Escalation, PrintJob, OrderEvent, OrderItem, Order,
-                  DriverZone, Customer, InventoryTransaction, Inventory, ProductPrice, PriceList,
-                  Product, Zone):
+    for model in (ProspectActivity, Prospect, Job, Message, Conversation, Escalation, PrintJob,
+                  OrderEvent, OrderItem, Order, DriverZone, Customer, InventoryTransaction, Inventory,
+                  ProductPrice, PriceList, Product, Zone):
         await db.execute(delete(model).where(model.tenant_id == tid))
     await db.execute(delete(User).where(User.tenant_id == tid))
     await db.execute(delete(Tenant).where(Tenant.id == tid))
@@ -102,8 +103,12 @@ async def seed(db: AsyncSession, email: str, password: str, *, reset: bool = Fal
     await db.flush()
     tid = tenant.id
 
-    db.add(User(tenant_id=tid, email=email, password_hash=hash_password(password),
-                full_name="Demo viewer", role=UserRole.DEMO.value))
+    demo_user = User(tenant_id=tid, email=email, password_hash=hash_password(password),
+                     full_name="Demo viewer", role=UserRole.DEMO.value)
+    db.add(demo_user)
+    rep = User(tenant_id=tid, email=f"nasser.demo.{uuid.uuid4().hex[:6]}@example.com",
+               password_hash=hash_password(uuid.uuid4().hex), full_name="Nasser", role=UserRole.SALESMAN.value)
+    db.add(rep)
 
     zones = {}
     for name in ZONES:
@@ -282,7 +287,56 @@ async def seed(db: AsyncSession, email: str, password: str, *, reset: bool = Fal
                            created_at=start + timedelta(minutes=i)))
 
     await db.commit()
+    await _seed_prospects(db, tid, rep, zones, now)
     return tenant
+
+
+# new shops in the pipeline: name, source, zone, phone, status, note
+PROSPECTS = [
+    ("Al Maather Grocery", "google", "Riyadh North", "+966500100201", "contacted", None),
+    ("Qurtubah Fresh Market", "import", "Riyadh East", "+966500100202", "interested",
+     "Wants a sample delivery on Thursday morning"),
+    ("Hittin Mini Mart", "import", "Riyadh West", "+966500100203", "new", None),
+    ("Al Yasmin Supermarket", "manual", None, "+966500100204", "new", None),
+    ("Laban Corner Store", "import", "Riyadh Central", None, "new", None),
+    ("Al Rawdah Baqala", "import", "Riyadh East", "+966500100206", "lost", None),
+]
+
+
+async def _seed_prospects(db: AsyncSession, tid, rep: User, zones: dict, now: datetime) -> None:
+    from app.modules.prospects.service import refresh_winbacks
+
+    for i, (name, source, zone_name, phone, status, note) in enumerate(PROSPECTS):
+        p = Prospect(tenant_id=tid, kind="new", source=source, status=status, name=name, phone=phone,
+                     zone_id=zones[zone_name].id if zone_name else None,
+                     area="Al Yasmin" if zone_name is None else None, category="Grocery",
+                     assigned_to_id=rep.id, created_by_id=rep.id,
+                     google_place_id=f"demo-place-{i}" if source == "google" else None,
+                     lost_reason="Has a fixed supplier contract" if status == "lost" else None,
+                     created_at=now - timedelta(days=6 - i))
+        if status in ("contacted", "interested"):
+            p.last_contacted_at = now - timedelta(days=2)
+        if status == "lost":
+            p.closed_at = now - timedelta(days=1)
+        db.add(p)
+        await db.flush()
+        origin = {"google": "Added from Google Maps", "import": "Imported (row %d)" % (i + 2),
+                  "manual": "Added by hand"}[source]
+        db.add(ProspectActivity(tenant_id=tid, prospect_id=p.id, kind="created", body=origin,
+                                actor_id=rep.id, actor_name=rep.full_name, created_at=p.created_at))
+        if p.last_contacted_at:
+            db.add(ProspectActivity(
+                tenant_id=tid, prospect_id=p.id, kind="contacted", actor_id=rep.id, actor_name=rep.full_name,
+                body=f"Hello {name}, this is Nasser from {DEMO_NAME.split(' — ')[-1]}. We supply shops at wholesale "
+                     "prices. Some of today's prices: Tomatoes 5 kg: SAR 35; Potatoes 10 kg: SAR 22. "
+                     "Would you like our full price list on WhatsApp?",
+                created_at=p.last_contacted_at))
+        if note:
+            db.add(ProspectActivity(tenant_id=tid, prospect_id=p.id, kind="note", body=note,
+                                    actor_id=rep.id, actor_name=rep.full_name, created_at=now - timedelta(days=1)))
+    await db.commit()
+    # quiet customers become win-back prospects, exactly as the "Find quiet customers" button does
+    await refresh_winbacks(db, tid, rep)
 
 
 async def _main(email: str, password: str, reset: bool) -> None:

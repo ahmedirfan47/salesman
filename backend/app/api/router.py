@@ -1,8 +1,8 @@
 from fastapi import APIRouter
 
 from app.api.v1 import (
-    agent, analytics, auth, conversations, customers, health, orders, pricing, printing, products, reports, users,
-    whatsapp, zones,
+    agent, analytics, auth, conversations, customers, health, orders, pricing, printing, products, prospects,
+    reports, users, whatsapp, zones,
 )
 
 api_router = APIRouter()
@@ -16,6 +16,7 @@ api_router.include_router(orders.router)
 api_router.include_router(agent.router)
 api_router.include_router(reports.router)
 api_router.include_router(analytics.router)
+api_router.include_router(prospects.router)
 api_router.include_router(printing.router)
 api_router.include_router(conversations.router)
 api_router.include_router(zones.router)

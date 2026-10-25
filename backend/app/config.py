@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     JOB_WORKER_ENABLED: bool = True   # run the worker inside the API process
     JOB_POLL_SECONDS: float = 1.0
 
+    # AI prospecting
+    GOOGLE_MAPS_API_KEY: str = ""            # Places API (New); empty = Google search off
+    PROSPECT_REGION_CODE: str = "SA"         # biases Google results to this country
+    PROSPECT_DEFAULT_COUNTRY_CODE: str = "966"  # for local numbers like 05xxxxxxxx
+
     # Error tracking (optional). Leave empty to disable Sentry.
     SENTRY_DSN: str = ""
     SENTRY_TRACES_SAMPLE_RATE: float = 0.0

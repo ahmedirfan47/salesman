@@ -34,5 +34,7 @@ services:
         sync: false
       - key: SENTRY_DSN
         sync: false
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
       - key: JOB_WORKER_ENABLED
         value: "true"

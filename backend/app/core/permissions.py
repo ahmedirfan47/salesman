@@ -28,6 +28,8 @@ class Capability(str, Enum):
     # they get their own capability rather than riding on VIEW_REPORTS
     # (which salesmen and viewers have). Owner/admin only, via _ALL.
     VIEW_ANALYTICS = "view_analytics"
+    # Finding new shops, win-back outreach and the prospect pipeline.
+    MANAGE_PROSPECTS = "manage_prospects"
 
 
 _ALL = set(Capability)
@@ -42,6 +44,7 @@ ROLE_CAPABILITIES: dict[UserRole, set[Capability]] = {
         Capability.VIEW_ORDERS,
         Capability.VIEW_CONVERSATIONS,
         Capability.VIEW_REPORTS,
+        Capability.MANAGE_PROSPECTS,
     },
     UserRole.DISPATCHER: {
         Capability.VIEW_ORDERS,

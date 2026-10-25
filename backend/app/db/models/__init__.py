@@ -13,6 +13,7 @@ from app.db.models.price_list import PriceList
 from app.db.models.print_job import PrintJob
 from app.db.models.product import Product
 from app.db.models.product_price import ProductPrice
+from app.db.models.prospect import Prospect, ProspectActivity
 from app.db.models.tenant import Tenant
 from app.db.models.user import User
 from app.db.models.zone import DriverZone, Zone
@@ -21,4 +22,5 @@ __all__ = [
     "Tenant", "User", "Product", "PriceList", "ProductPrice",
     "Inventory", "InventoryTransaction", "Order", "OrderItem", "OrderEvent",
     "Escalation", "PrintJob", "Conversation", "Message", "Zone", "DriverZone", "Customer", "Job",
+    "Prospect", "ProspectActivity",
 ]

@@ -286,6 +286,9 @@ async def test_seed_demo_builds_a_useful_dataset(db, client):
     assert {c["name"] for c in quiet} >= {"Al Waha Market", "Green Valley Store"}
     esc = (await client.get("/api/v1/orders/escalations/open", headers=_auth(demo))).json()
     assert len(esc) == 1
+    pros = (await client.get("/api/v1/prospects", headers=_auth(demo))).json()
+    assert sum(p["kind"] == "new" for p in pros) == 6
+    assert {p["name"] for p in pros if p["kind"] == "winback"} == {"Al Waha Market", "Green Valley Store"}
 
     # rebuilding is repeatable
     again = await seed(db, "demo@example.com", "demo-password-123", reset=True)
