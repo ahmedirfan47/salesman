@@ -34,6 +34,9 @@ class ProductPrice(UUIDPKMixin, TimestampMixin, Base):
     unit_price: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
     sheet_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Cost from the sheet's optional Cost column. Applied to Product.cost_price
+    # when this list is activated; kept here as part of the version snapshot.
+    unit_cost: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
 
     effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     effective_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -4,6 +4,7 @@ from app.db.models.conversation import Conversation
 from app.db.models.escalation import Escalation
 from app.db.models.inventory import Inventory
 from app.db.models.inventory_transaction import InventoryTransaction
+from app.db.models.job import Job
 from app.db.models.message import Message
 from app.db.models.order import Order
 from app.db.models.order_event import OrderEvent
@@ -19,5 +20,5 @@ from app.db.models.zone import DriverZone, Zone
 __all__ = [
     "Tenant", "User", "Product", "PriceList", "ProductPrice",
     "Inventory", "InventoryTransaction", "Order", "OrderItem", "OrderEvent",
-    "Escalation", "PrintJob", "Conversation", "Message", "Zone", "DriverZone","Customer",
+    "Escalation", "PrintJob", "Conversation", "Message", "Zone", "DriverZone", "Customer", "Job",
 ]

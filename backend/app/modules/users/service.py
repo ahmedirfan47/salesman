@@ -12,9 +12,13 @@ from app.db.models.user import User
 
 def _valid_role(role: str) -> str:
     try:
-        return UserRole(role).value
+        value = UserRole(role).value
     except ValueError:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Invalid role '{role}'")
+    if value == UserRole.DEMO.value:
+        # Demo accounts are created only by `python -m app.scripts.seed_demo`.
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "The demo role can't be assigned here")
+    return value
 
 
 async def list_users(db: AsyncSession, tenant_id: uuid.UUID) -> list[User]:

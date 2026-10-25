@@ -6,8 +6,8 @@ with certainty fails loudly with the row number, rather than being guessed --
 protecting the 'never hallucinate prices' rule at the ingestion layer.
 
 Rules:
-- A "cost" / "purchase price" column is recognised but NEVER used as the
-  selling price.
+- A "cost" / "purchase price" column is NEVER used as the selling price. When
+  present, it is imported as the product's cost (used for margin analytics).
 - If two columns could both be the price (or SKU, or quantity), the upload is
   rejected instead of silently picking one.
 - Numbers may use Arabic-Indic digits, thousands separators and a currency
@@ -36,7 +36,7 @@ _ALIASES: dict[str, set[str]] = {
              "الاسم", "المنتج", "اسم المنتج", "الصنف"},
     "price": {"price", "unit price", "selling price", "sell price", "sale price", "rate",
               "السعر", "الثمن", "سعر البيع", "سعر الوحدة"},
-    # Recognised so it can never be mistaken for the selling price. Not imported.
+    # Never mistaken for the selling price; imported as the product's cost.
     "cost": {"cost", "unit cost", "cost price", "purchase price", "buying price", "buy price",
              "التكلفة", "سعر التكلفة", "سعر الشراء"},
     "quantity": {"quantity", "qty", "stock", "available", "quantity available", "stock qty",
@@ -159,6 +159,7 @@ def _parse(ws) -> list[PriceLineIn]:
     header_row_num = 0
     columns: dict[str, list[tuple[int, str]]] = {}
     price_hint: str | None = None
+    cost_hint: str | None = None
     for row_num, raw in enumerate(rows, start=1):
         found: dict[str, list[tuple[int, str]]] = {}
         hints: dict[str, str] = {}
@@ -169,7 +170,8 @@ def _parse(ws) -> list[PriceLineIn]:
                 if hint:
                     hints[field] = hint
         if "sku" in found and "price" in found:
-            header_row_num, columns, price_hint = row_num, found, hints.get("price")
+            header_row_num, columns = row_num, found
+            price_hint, cost_hint = hints.get("price"), hints.get("cost")
             break
 
     if not header_row_num:
@@ -186,7 +188,7 @@ def _parse(ws) -> list[PriceLineIn]:
         if specific:
             columns["sku"] = specific
 
-    for field in ("sku", "price", "quantity", "currency"):
+    for field in ("sku", "price", "cost", "quantity", "currency"):
         if len(columns.get(field, [])) > 1:
             names = ", ".join(f"'{h}' (column {get_column_letter(i + 1)})" for i, h in columns[field])
             raise ExcelParseError(
@@ -199,7 +201,7 @@ def _parse(ws) -> list[PriceLineIn]:
             "Missing required column: quantity (recognised names include: quantity, qty, stock, الكمية)."
         )
 
-    col = {f: v[0][0] for f, v in columns.items() if f != "cost"}
+    col = {f: v[0][0] for f, v in columns.items()}
 
     # 2. read the product rows
     lines: list[PriceLineIn] = []
@@ -233,6 +235,21 @@ def _parse(ws) -> list[PriceLineIn]:
         if price.as_tuple().exponent < -2:  # e.g. a formula result like 10/3
             price = price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
+        unit_cost, cost_ccy = None, None
+        if "cost" in col:
+            cost_cell = _cell(raw, col["cost"])
+            if cost_cell is not None and str(cost_cell).strip():
+                unit_cost, cost_ccy = _to_decimal(cost_cell)
+                cost_ccy = cost_ccy or cost_hint
+                if unit_cost is None:
+                    errors.append(f"{where}: cost '{cost_cell}' is not a number")
+                    continue
+                if unit_cost < 0:
+                    errors.append(f"{where}: cost cannot be negative")
+                    continue
+                if unit_cost.as_tuple().exponent < -2:
+                    unit_cost = unit_cost.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
         qty_cell = _cell(raw, col["quantity"])
         if qty_cell is None or (isinstance(qty_cell, str) and not qty_cell.strip()):
             quantity = 0
@@ -251,19 +268,22 @@ def _parse(ws) -> list[PriceLineIn]:
             c = _cell(raw, col["currency"])
             if c not in (None, ""):
                 currency = _find_currency(str(c)) or str(c).strip().upper()
-        currency = currency or cell_ccy or price_hint
+        currency = currency or cell_ccy or price_hint or cost_ccy
         if currency is not None:
             if not _ISO.match(currency):
                 errors.append(f"{where}: currency '{currency}' is not a 3-letter code such as SAR")
                 continue
             currencies.add(currency)
+        if cost_ccy and cost_ccy != (currency or "USD"):
+            errors.append(f"{where}: cost is in {cost_ccy} but the price is in {currency or 'USD'}")
+            continue
 
         name = None
         if "name" in col:
             n = _cell(raw, col["name"])
             name = str(n).strip() if n is not None and str(n).strip() else None
 
-        line = {"sku": sku, "unit_price": price, "quantity": quantity, "name_en": name}
+        line = {"sku": sku, "unit_price": price, "quantity": quantity, "name_en": name, "unit_cost": unit_cost}
         if currency:
             line["currency"] = currency
         lines.append(PriceLineIn(**line))

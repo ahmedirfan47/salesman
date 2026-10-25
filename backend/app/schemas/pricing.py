@@ -12,6 +12,8 @@ class PriceLineIn(BaseModel):
     unit_price: Decimal = Field(ge=0)
     quantity: int = Field(ge=0)
     currency: str = Field(default="USD", min_length=3, max_length=3)
+    # optional: what the product costs the business (from a "Cost" column)
+    unit_cost: Decimal | None = Field(default=None, ge=0)
     # optional: create the product on the fly if the SKU is new
     name_en: str | None = None
     name_ar: str | None = None

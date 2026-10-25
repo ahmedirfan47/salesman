@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
-import { Package, ShoppingCart, DollarSign, AlertTriangle } from "lucide-react";
+import { Package, ShoppingCart, Banknote, AlertTriangle } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, CartesianGrid,
@@ -62,7 +62,7 @@ export default function OverviewPage() {
   const cards = [
     { label: "Products", value: catalog.length, icon: Package, color: "text-indigo-600" },
     { label: "Orders", value: orders.length, icon: ShoppingCart, color: "text-emerald-600" },
-    { label: "Revenue", value: `$${revenue.toLocaleString()}`, icon: DollarSign, color: "text-amber-600" },
+    { label: "Revenue", value: `${orders[0]?.currency ?? ""} ${revenue.toLocaleString()}`.trim(), icon: Banknote, color: "text-amber-600" },
     { label: "Open escalations", value: escalations, icon: AlertTriangle, color: "text-red-600" },
   ];
 

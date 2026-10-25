@@ -9,6 +9,9 @@ class UserRole(str, Enum):
     DRIVER = "driver"
     WAREHOUSE = "warehouse"
     VIEWER = "viewer"
+    # Read-only showcase account for pilots/investors: sees everything,
+    # changes nothing (enforced in app.core.deps.get_current_user).
+    DEMO = "demo"
 
 
 # Kept for backward-compatible require_role() checks. Job roles sit at a low
@@ -20,5 +23,6 @@ ROLE_HIERARCHY: dict[UserRole, int] = {
     UserRole.DISPATCHER: 1,
     UserRole.WAREHOUSE: 1,
     UserRole.ADMIN: 2,
+    UserRole.DEMO: 2,  # may VIEW admin pages; every write is blocked separately
     UserRole.OWNER: 3,
 }

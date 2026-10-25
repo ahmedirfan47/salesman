@@ -9,7 +9,9 @@ Core rule: uploading a new price list NEVER overwrites history.
     2. marks the old active list 'superseded',
     3. opens this list's parked rows (effective_from = now, effective_to = NULL),
     4. sets inventory to the sheet quantities, writing immutable ledger rows,
-    5. marks this list 'active'.
+    5. copies any costs from the sheet onto the products (cost_price), so
+       orders from now on snapshot that cost for margin analytics,
+    6. marks this list 'active'.
 """
 import uuid
 from datetime import datetime, timezone
@@ -86,6 +88,7 @@ async def create_price_list(
                 unit_price=line.unit_price,
                 currency=line.currency,
                 sheet_quantity=line.quantity,
+                unit_cost=line.unit_cost,
                 effective_from=now,
                 effective_to=now,
             )
@@ -137,6 +140,13 @@ async def activate_price_list(
     ):
         p.effective_from = now
         p.effective_to = None
+        if p.unit_cost is not None:
+            # Only rows that carry a cost update it; a sheet without a Cost
+            # column never wipes costs entered on the Analytics page.
+            product = await db.get(Product, p.product_id)
+            if product is not None and product.tenant_id == tenant_id:
+                product.cost_price = p.unit_cost
+                product.cost_currency = p.currency
         if p.sheet_quantity is not None:
             await _set_inventory(
                 db,

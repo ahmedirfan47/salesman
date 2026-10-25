@@ -10,6 +10,7 @@ services:
     plan: free
     rootDir: backend
     dockerfilePath: Dockerfile
+    healthCheckPath: /api/v1/health
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -27,3 +28,11 @@ services:
         sync: false
       - key: LLM_API_KEY
         sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
+      - key: WHATSAPP_APP_SECRET
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+      - key: JOB_WORKER_ENABLED
+        value: "true"

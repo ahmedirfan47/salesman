@@ -3,12 +3,17 @@
 - verify_signature: confirm a POST really came from Meta (HMAC on the raw body)
 - send_text: reply to a customer via the Graph API
 - process_incoming: route an inbound text message to the tenant, run the AI
-  agent, send the reply, and persist the conversation.
+  agent, persist the conversation, and queue the reply for sending.
 - process_incoming_audio: download a voice note, transcribe it, then reuse the
   text pipeline.
+
+Both inbound functions run from the job queue (see app.jobs), never inside the
+webhook request, and are idempotent per WhatsApp message id: if Meta delivers
+the same message twice, it is answered once.
 """
 import hashlib
 import hmac
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -22,8 +27,12 @@ from app.config import settings
 from app.db.models.conversation import Conversation
 from app.db.models.message import Message
 from app.db.models.tenant import Tenant
+from app.jobs.queue import WHATSAPP_SEND_TEXT, enqueue
 
 _HISTORY_LIMIT = 12
+_FALLBACK_REPLY = "Sorry, I couldn't process that. A team member will follow up."
+
+logger = logging.getLogger("salesman.whatsapp")
 
 
 def verify_signature(raw_body: bytes, signature_header: str | None) -> bool:
@@ -99,6 +108,30 @@ async def _history(db: AsyncSession, conversation_id: uuid.UUID) -> list[dict]:
     ]
 
 
+async def _already_handled(db: AsyncSession, tenant_id: uuid.UUID, wa_message_id: str | None) -> bool:
+    if not wa_message_id:
+        return False
+    found = await db.scalar(
+        select(Message.id).where(
+            Message.tenant_id == tenant_id,
+            Message.wa_message_id == wa_message_id,
+            Message.direction == "in",
+        )
+    )
+    return found is not None
+
+
+async def queue_reply(db: AsyncSession, tenant: Tenant, to_number: str, body: str) -> None:
+    """Send via the job queue so a temporary Meta/API outage is retried, not lost."""
+    await enqueue(
+        db,
+        WHATSAPP_SEND_TEXT,
+        {"tenant_id": str(tenant.id), "to": to_number, "body": body},
+        tenant_id=tenant.id,
+        max_attempts=5,
+    )
+
+
 async def _download_media(tenant: Tenant, media_id: str) -> tuple[bytes, str] | None:
     """Fetch a WhatsApp media file: first resolve the media URL, then download it.
     Returns (bytes, filename) or None."""
@@ -139,13 +172,16 @@ async def process_incoming_audio(
     )
     if not tenant:
         return
+    if await _already_handled(db, tenant.id, wa_message_id):
+        return
     media = await _download_media(tenant, media_id)
     if not media:
         return
     audio_bytes, filename = media
     try:
         text = await transcribe(audio_bytes, filename)
-    except Exception:
+    except Exception:  # noqa: BLE001
+        logger.exception("voice note transcription failed", extra={"ctx_tenant_id": str(tenant.id)})
         text = ""
     if not text:
         conv = await _get_or_create_conversation(db, tenant.id, from_number, profile_name)
@@ -155,7 +191,10 @@ async def process_incoming_audio(
             wa_message_id=wa_message_id,
         ))
         await db.commit()
-        await send_text(tenant, from_number, "Sorry, I couldn't understand that voice note. Could you type your message or send it again?")
+        await queue_reply(
+            db, tenant, from_number,
+            "Sorry, I couldn't understand that voice note. Could you type your message or send it again?",
+        )
         return
 
     await process_incoming(
@@ -179,6 +218,8 @@ async def process_incoming(
     )
     if not tenant:
         return
+    if await _already_handled(db, tenant.id, wa_message_id):
+        return
 
     conv = await _get_or_create_conversation(db, tenant.id, from_number, profile_name)
 
@@ -192,8 +233,17 @@ async def process_incoming(
     conv.last_message_at = now
     await db.commit()
 
-    result = await run_agent(db, tenant.id, tenant.name, history, text)
-    reply = result.get("reply") or "Sorry, I couldn't process that. A team member will follow up."
+    tenant_id, conv_id = tenant.id, conv.id
+    try:
+        result = await run_agent(db, tenant_id, tenant.name, history, text)
+        reply = result.get("reply") or _FALLBACK_REPLY
+    except Exception:  # noqa: BLE001 -- the customer always gets an answer
+        logger.exception("AI agent failed", extra={"ctx_tenant_id": str(tenant_id)})
+        await db.rollback()
+        # rollback expires loaded objects; reload them before touching attributes
+        tenant = await db.get(Tenant, tenant_id)
+        conv = await db.get(Conversation, conv_id)
+        reply = _FALLBACK_REPLY
 
     db.add(Message(
         tenant_id=tenant.id, conversation_id=conv.id, direction="out",
@@ -202,4 +252,4 @@ async def process_incoming(
     conv.last_message_at = datetime.now(timezone.utc)
     await db.commit()
 
-    await send_text(tenant, from_number, reply)
+    await queue_reply(db, tenant, from_number, reply)

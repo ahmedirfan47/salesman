@@ -39,6 +39,45 @@ def test_cost_column_is_never_used_as_price_even_when_it_comes_first():
         ["TOM-5", 24.5, 35, 10],
     ]))
     assert lines[0].unit_price == Decimal("35")
+    assert lines[0].unit_cost == Decimal("24.5")
+
+
+def test_cost_is_optional_per_row():
+    lines = parse_price_sheet(_xlsx([
+        ["SKU", "Price", "Purchase price", "Qty"],
+        ["A", 35, 24.5, 1],
+        ["B", 22, None, 1],
+    ]))
+    by = _by_sku(lines)
+    assert by["A"].unit_cost == Decimal("24.5")
+    assert by["B"].unit_cost is None
+
+
+def test_no_cost_column_means_no_cost():
+    lines = parse_price_sheet(_xlsx([["SKU", "Price", "Qty"], ["A", 35, 1]]))
+    assert lines[0].unit_cost is None
+
+
+def test_arabic_cost_column_and_currency_from_cost_header():
+    lines = parse_price_sheet(_xlsx([["الرمز", "السعر", "سعر الشراء (ر.س)", "الكمية"], ["A", "٣٥", "٢٤٫٥", "٥"]]))
+    assert lines[0].unit_cost == Decimal("24.5")
+    assert lines[0].currency == "SAR"
+
+
+@pytest.mark.parametrize("bad, msg", [("abc", "cost 'abc' is not a number"), (-1, "cost cannot be negative")])
+def test_bad_costs_rejected(bad, msg):
+    with pytest.raises(ExcelParseError, match=msg):
+        parse_price_sheet(_xlsx([["SKU", "Price", "Cost", "Qty"], ["A", 35, bad, 1]]))
+
+
+def test_cost_in_a_different_currency_rejected():
+    with pytest.raises(ExcelParseError, match="cost is in USD but the price is in SAR"):
+        parse_price_sheet(_xlsx([["SKU", "Price", "Cost", "Qty"], ["A", "SAR 35", "USD 6", 1]]))
+
+
+def test_two_cost_columns_rejected():
+    with pytest.raises(ExcelParseError, match="More than one column could be the cost"):
+        parse_price_sheet(_xlsx([["SKU", "Price", "Cost", "Unit cost", "Qty"], ["A", 35, 20, 21, 1]]))
 
 
 def test_sheet_with_only_a_cost_column_is_rejected():

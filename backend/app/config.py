@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     WHATSAPP_APP_SECRET: str = ""     # for verifying POST signatures
     WHATSAPP_API_BASE: str = "https://graph.facebook.com/v21.0"
 
+    # Background jobs (Postgres-backed queue; see app/jobs)
+    JOB_WORKER_ENABLED: bool = True   # run the worker inside the API process
+    JOB_POLL_SECONDS: float = 1.0
+
+    # Error tracking (optional). Leave empty to disable Sentry.
+    SENTRY_DSN: str = ""
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.0
+
     # CORS: comma-separated list of allowed origins (as a plain string to avoid
     # pydantic-settings JSON parsing). Access the parsed list via .cors_origins.
     CORS_ORIGINS: str = "http://localhost:3000"

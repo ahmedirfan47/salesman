@@ -35,6 +35,8 @@ _ALL = set(Capability)
 ROLE_CAPABILITIES: dict[UserRole, set[Capability]] = {
     UserRole.OWNER: set(_ALL),
     UserRole.ADMIN: set(_ALL),
+    # Demo sees every screen; app.core.deps blocks all writes for this role.
+    UserRole.DEMO: set(_ALL),
     UserRole.SALESMAN: {
         Capability.CREATE_ORDER,
         Capability.VIEW_ORDERS,

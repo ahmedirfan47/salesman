@@ -23,4 +23,4 @@ class Message(UUIDPKMixin, TimestampMixin, Base):
     sender: Mapped[str] = mapped_column(String(12), default="customer", nullable=False)  # customer|ai|admin
     msg_type: Mapped[str] = mapped_column(String(16), default="text", nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    wa_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    wa_message_id: Mapped[str | None] = mapped_column(String(128), index=True, nullable=True)

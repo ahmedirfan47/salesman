@@ -2,7 +2,7 @@ import uuid
 from typing import Annotated
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,7 +17,12 @@ _bearer = HTTPBearer(auto_error=True)
 DBSession = Annotated[AsyncSession, Depends(get_session)]
 
 
+_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+DEMO_READ_ONLY_MESSAGE = "This is a read-only demo account. Changes are disabled."
+
+
 async def get_current_user(
+    request: Request,
     creds: Annotated[HTTPAuthorizationCredentials, Depends(_bearer)],
     db: DBSession,
 ) -> User:
@@ -32,6 +37,10 @@ async def get_current_user(
     user = await db.get(User, uuid.UUID(payload["sub"]))
     if user is None or not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found or inactive")
+    # One choke point for the demo account: every authenticated route depends
+    # on this function, so no write can slip through a route-level check.
+    if user.role == UserRole.DEMO.value and request.method not in _SAFE_METHODS:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, DEMO_READ_ONLY_MESSAGE)
     return user
 
 
