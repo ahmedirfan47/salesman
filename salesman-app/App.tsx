@@ -31,15 +31,10 @@ function RootNavigator() {
       return <LoginScreen onBack={() => setPreAuthScreen("subscription")} />;
     }
     return (
-      <SubscriptionScreen
-        onContinue={(planId, period) => {
-          // Selecting a plan here doesn't create an account -- accounts on
-          // this app are created by an admin via the web dashboard's Team &
-          // Access page. This just gets the visitor to sign-in.
-          setPreAuthScreen("login");
-        }}
-        onSignIn={() => setPreAuthScreen("login")}
-      />
+      // Accounts on this app are created by an admin via the web dashboard's
+      // Team & Access page, so the pre-auth screen only offers pricing,
+      // a contact CTA, and sign-in.
+      <SubscriptionScreen onSignIn={() => setPreAuthScreen("login")} />
     );
   }
 

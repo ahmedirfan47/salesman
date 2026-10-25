@@ -1,6 +1,6 @@
 /**
  * Design tokens for the Salesman mobile app.
- * Mirrors the light, premium direction used across Sonic's web properties
+ * Mirrors the light, premium direction used across Stonic's web properties
  * so the app doesn't feel like a different product.
  */
 export const colors = {

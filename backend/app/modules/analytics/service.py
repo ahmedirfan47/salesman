@@ -18,6 +18,8 @@ from app.db.models.customer import Customer
 from app.db.models.order import Order
 from app.db.models.order_event import OrderEvent
 from app.db.models.order_item import OrderItem
+from app.db.models.product import Product
+from app.db.models.product_price import ProductPrice
 
 # Statuses that represent revenue actually earned (not cancelled/held).
 REVENUE_STATUSES = ("confirmed", "preparing", "dispatched", "delivered", "completed")
@@ -252,3 +254,193 @@ async def stuck_orders(db: AsyncSession, tenant_id: uuid.UUID) -> list[StuckOrde
 
     out.sort(key=lambda o: o.hours_in_status, reverse=True)
     return out
+
+
+# --- headline summary --------------------------------------------------------
+
+@dataclass
+class MarginSummary:
+    days: int
+    currency: str | None
+    revenue: Decimal
+    order_count: int
+    # Revenue/cost/profit restricted to order lines that carry a cost snapshot,
+    # so the headline margin is computed only over data we actually have.
+    costed_revenue: Decimal
+    costed_cost: Decimal
+    costed_profit: Decimal
+    margin_percent: float | None
+    cost_coverage_percent: float
+    """Share of revenue (by value) whose cost is known. Low coverage means the
+    headline margin describes only part of the business."""
+    products_missing_cost: int
+    """Active products with no cost price set -- the to-do list for owners."""
+
+
+async def margin_summary(
+    db: AsyncSession, tenant_id: uuid.UUID, *, days: int = 30
+) -> MarginSummary:
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    has_cost = OrderItem.unit_cost.is_not(None)
+
+    row = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(OrderItem.line_total), 0).label("revenue"),
+                func.coalesce(
+                    func.sum(OrderItem.line_total).filter(has_cost), 0
+                ).label("costed_revenue"),
+                func.coalesce(
+                    func.sum(OrderItem.unit_cost * OrderItem.quantity).filter(has_cost), 0
+                ).label("costed_cost"),
+                func.count(func.distinct(Order.id)).label("orders"),
+            )
+            .join(Order, Order.id == OrderItem.order_id)
+            .where(
+                OrderItem.tenant_id == tenant_id,
+                Order.status.in_(REVENUE_STATUSES),
+                Order.created_at >= since,
+            )
+        )
+    ).one()
+
+    currency = await db.scalar(
+        select(Order.currency)
+        .where(Order.tenant_id == tenant_id)
+        .order_by(Order.created_at.desc())
+        .limit(1)
+    )
+    missing = await db.scalar(
+        select(func.count(Product.id)).where(
+            Product.tenant_id == tenant_id,
+            Product.is_active.is_(True),
+            Product.cost_price.is_(None),
+        )
+    )
+
+    revenue = Decimal(str(row.revenue))
+    c_rev = Decimal(str(row.costed_revenue))
+    c_cost = Decimal(str(row.costed_cost))
+    c_profit = c_rev - c_cost
+    return MarginSummary(
+        days=days,
+        currency=currency,
+        revenue=revenue,
+        order_count=int(row.orders or 0),
+        costed_revenue=c_rev,
+        costed_cost=c_cost,
+        costed_profit=c_profit,
+        margin_percent=round(float(c_profit / c_rev * 100), 1) if c_rev > 0 else None,
+        cost_coverage_percent=round(float(c_rev / revenue * 100), 1) if revenue > 0 else 0.0,
+        products_missing_cost=int(missing or 0),
+    )
+
+
+# --- cost entry ----------------------------------------------------------------
+
+@dataclass
+class ProductCost:
+    product_id: uuid.UUID
+    sku: str
+    name: str
+    is_active: bool
+    cost_price: Decimal | None
+    cost_currency: str | None
+    sell_price: Decimal | None
+    sell_currency: str | None
+    current_margin_percent: float | None
+    """Margin at TODAY's sell price and cost -- forward-looking, unlike
+    product_margins(), which reports what past orders actually earned."""
+
+
+async def product_costs(db: AsyncSession, tenant_id: uuid.UUID) -> list[ProductCost]:
+    rows = await db.execute(
+        select(
+            Product.id,
+            Product.sku,
+            Product.name_en,
+            Product.is_active,
+            Product.cost_price,
+            Product.cost_currency,
+            ProductPrice.unit_price,
+            ProductPrice.currency,
+        )
+        .outerjoin(
+            ProductPrice,
+            (ProductPrice.product_id == Product.id)
+            & (ProductPrice.tenant_id == tenant_id)
+            & (ProductPrice.effective_to.is_(None)),
+        )
+        .where(Product.tenant_id == tenant_id)
+        .order_by(Product.is_active.desc(), Product.sku)
+    )
+    out: list[ProductCost] = []
+    for r in rows:
+        cost = Decimal(str(r.cost_price)) if r.cost_price is not None else None
+        sell = Decimal(str(r.unit_price)) if r.unit_price is not None else None
+        same_ccy = r.cost_currency is None or r.currency is None or r.cost_currency == r.currency
+        margin = None
+        if cost is not None and sell is not None and sell > 0 and same_ccy:
+            margin = round(float((sell - cost) / sell * 100), 1)
+        out.append(
+            ProductCost(
+                product_id=r.id,
+                sku=r.sku,
+                name=r.name_en,
+                is_active=r.is_active,
+                cost_price=cost,
+                cost_currency=r.cost_currency,
+                sell_price=sell,
+                sell_currency=r.currency,
+                current_margin_percent=margin,
+            )
+        )
+    return out
+
+
+class CostUpdateError(ValueError):
+    """Raised when a cost update references products outside the tenant."""
+
+
+async def set_product_costs(
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    updates: list[tuple[uuid.UUID, Decimal | None, str | None]],
+) -> int:
+    """Set (or clear, with None) cost prices in one transaction.
+
+    Only affects FUTURE orders: each order line snapshots the cost at order
+    time, so historical margins are never rewritten. When no currency is
+    given, the product's current sell-price currency is used, so cost and
+    price are compared like-for-like.
+    """
+    if not updates:
+        return 0
+    ids = [u[0] for u in updates]
+    products = {
+        p.id: p
+        for p in await db.scalars(
+            select(Product).where(Product.tenant_id == tenant_id, Product.id.in_(ids))
+        )
+    }
+    missing = [str(i) for i in ids if i not in products]
+    if missing:
+        raise CostUpdateError(f"Unknown product(s): {', '.join(missing)}")
+
+    sell_ccy = dict(
+        (
+            await db.execute(
+                select(ProductPrice.product_id, ProductPrice.currency).where(
+                    ProductPrice.tenant_id == tenant_id,
+                    ProductPrice.product_id.in_(ids),
+                    ProductPrice.effective_to.is_(None),
+                )
+            )
+        ).all()
+    )
+    for pid, cost, ccy in updates:
+        p = products[pid]
+        p.cost_price = cost
+        p.cost_currency = None if cost is None else (ccy or sell_ccy.get(pid) or p.cost_currency)
+    await db.commit()
+    return len(updates)

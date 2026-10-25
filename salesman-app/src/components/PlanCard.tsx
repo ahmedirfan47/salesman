@@ -1,12 +1,10 @@
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { colors, radius, spacing, typography } from "../theme/theme";
-import type { BillingPeriod, Plan } from "../data/plans";
+import { INCLUDED_FEATURES, PRICING, formatMoney, quote } from "../data/plans";
 
 interface Props {
-  plan: Plan;
-  period: BillingPeriod;
-  selected: boolean;
-  onSelect: (planId: string) => void;
+  branches: number;
+  onBranchesChange: (n: number) => void;
 }
 
 function Check() {
@@ -17,65 +15,77 @@ function Check() {
   );
 }
 
-export function PlanCard({ plan, period, selected, onSelect }: Props) {
-  const price =
-    period === "annual" ? plan.annualMonthlyPrice : plan.monthlyPrice;
-
+function Stepper({ label, onPress, disabled }: { label: string; onPress: () => void; disabled: boolean }) {
   return (
     <Pressable
-      onPress={() => onSelect(plan.id)}
-      style={[styles.card, selected && styles.cardSelected]}
+      onPress={onPress}
+      disabled={disabled}
+      style={[styles.stepBtn, disabled && styles.stepBtnDisabled]}
       accessibilityRole="button"
-      accessibilityState={{ selected }}
-      accessibilityLabel={`${plan.name} plan. ${plan.tagline}.`}
+      accessibilityLabel={label === "−" ? "Fewer branches" : "More branches"}
     >
-      {plan.recommended && (
-        <View style={styles.ribbon}>
-          <Text style={styles.ribbonText}>MOST POPULAR</Text>
-        </View>
-      )}
+      <Text style={styles.stepText}>{label}</Text>
+    </Pressable>
+  );
+}
 
-      <View style={styles.headerRow}>
+/** The single Salesman plan: per-branch setup + monthly, with a live quote. */
+export function PlanCard({ branches, onBranchesChange }: Props) {
+  const q = quote(branches);
+
+  return (
+    <View style={styles.card}>
+      <Text style={styles.name}>Salesman</Text>
+      <Text style={styles.tagline}>One plan, priced per branch. Everything included.</Text>
+
+      <View style={styles.priceGrid}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.name}>{plan.name}</Text>
-          <Text style={styles.tagline}>{plan.tagline}</Text>
+          <Text style={styles.priceLabel}>SETUP, PER BRANCH</Text>
+          <Text style={styles.price}>{formatMoney(PRICING.setupPerBranch)}</Text>
+          <Text style={styles.per}>one-time</Text>
         </View>
-        <View style={[styles.radio, selected && styles.radioSelected]}>
-          {selected && <View style={styles.radioInner} />}
+        <View style={{ flex: 1 }}>
+          <Text style={styles.priceLabel}>PER BRANCH</Text>
+          <Text style={styles.price}>{formatMoney(PRICING.monthlyPerBranch)}</Text>
+          <Text style={styles.per}>per month</Text>
         </View>
       </View>
 
-      <View style={styles.priceRow}>
-        {plan.custom ? (
-          <Text style={styles.customPrice}>Custom pricing</Text>
-        ) : plan.free ? (
-          <>
-            <Text style={styles.price}>Free</Text>
-            <Text style={styles.per}>forever</Text>
-          </>
-        ) : (
-          <>
-            <Text style={styles.currency}>{plan.currency}</Text>
-            <Text style={styles.price}>{price.toLocaleString()}</Text>
-            <Text style={styles.per}>/month</Text>
-          </>
-        )}
+      <View style={styles.divider} />
+
+      <Text style={styles.branchLabel}>How many branches?</Text>
+      <View style={styles.stepRow}>
+        <Stepper label="−" onPress={() => onBranchesChange(q.branches - 1)} disabled={q.branches <= 1} />
+        <Text style={styles.branchCount} accessibilityLiveRegion="polite">{q.branches}</Text>
+        <Stepper label="+" onPress={() => onBranchesChange(q.branches + 1)} disabled={q.branches >= PRICING.maxBranches} />
       </View>
-      {!plan.custom && !plan.free && period === "annual" && (
-        <Text style={styles.billedNote}>billed annually</Text>
-      )}
+
+      <View style={styles.quote}>
+        <View style={styles.quoteRow}>
+          <Text style={styles.quoteKey}>Setup</Text>
+          <Text style={styles.quoteVal}>{formatMoney(q.setup)}</Text>
+        </View>
+        <View style={styles.quoteRow}>
+          <Text style={styles.quoteKey}>Monthly</Text>
+          <Text style={styles.quoteVal}>{formatMoney(q.monthly)}/mo</Text>
+        </View>
+        <View style={[styles.quoteRow, styles.quoteTotal]}>
+          <Text style={[styles.quoteKey, { color: colors.text, fontWeight: "600" }]}>First year total</Text>
+          <Text style={[styles.quoteVal, { fontSize: 17 }]}>{formatMoney(q.firstYear)}</Text>
+        </View>
+      </View>
 
       <View style={styles.divider} />
 
       <View style={styles.features}>
-        {plan.features.map((f) => (
+        {INCLUDED_FEATURES.map((f) => (
           <View key={f} style={styles.featureRow}>
             <Check />
             <Text style={styles.featureText}>{f}</Text>
           </View>
         ))}
       </View>
-    </Pressable>
+    </View>
   );
 }
 
@@ -84,74 +94,36 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     borderRadius: radius.xl,
     borderWidth: 1.5,
-    borderColor: colors.border,
+    borderColor: colors.accent,
     padding: spacing.lg,
     marginBottom: spacing.md,
   },
-  cardSelected: {
-    borderColor: colors.accent,
-    backgroundColor: colors.accentDim,
-  },
-  ribbon: {
-    alignSelf: "flex-start",
-    backgroundColor: colors.accent,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: radius.sm,
-    marginBottom: spacing.sm + 2,
-  },
-  ribbonText: { ...typography.tiny, color: colors.white },
-  headerRow: { flexDirection: "row", alignItems: "flex-start", gap: spacing.md },
   name: { ...typography.title, color: colors.text },
-  tagline: {
-    ...typography.caption,
-    color: colors.textMuted,
-    marginTop: 2,
-    lineHeight: 18,
+  tagline: { ...typography.caption, color: colors.textMuted, marginTop: 2, lineHeight: 18 },
+  priceGrid: { flexDirection: "row", gap: spacing.md, marginTop: spacing.md },
+  priceLabel: { ...typography.tiny, color: colors.textDim },
+  price: { fontSize: 28, fontWeight: "700", color: colors.text, letterSpacing: -0.8, marginTop: 4 },
+  per: { ...typography.caption, color: colors.textDim },
+  divider: { height: 1, backgroundColor: colors.border, marginVertical: spacing.md },
+  branchLabel: { ...typography.bodyMedium, color: colors.text },
+  stepRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginTop: spacing.sm },
+  stepBtn: {
+    width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: colors.borderStrong,
+    alignItems: "center", justifyContent: "center", backgroundColor: colors.white,
   },
-  radio: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2,
-    borderColor: colors.borderStrong,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 2,
-  },
-  radioSelected: { borderColor: colors.accent },
-  radioInner: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: colors.accent,
-  },
-  priceRow: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    gap: spacing.xs,
-    marginTop: spacing.md,
-  },
-  currency: { ...typography.body, color: colors.textMuted },
-  price: { fontSize: 34, fontWeight: "700", color: colors.text, letterSpacing: -1 },
-  per: { ...typography.body, color: colors.textMuted },
-  customPrice: { ...typography.title, color: colors.text, marginTop: 2 },
-  billedNote: { ...typography.caption, color: colors.textDim, marginTop: 2 },
-  divider: {
-    height: 1,
-    backgroundColor: colors.border,
-    marginVertical: spacing.md,
-  },
+  stepBtnDisabled: { opacity: 0.4 },
+  stepText: { fontSize: 20, color: colors.text, fontWeight: "500" },
+  branchCount: { fontSize: 24, fontWeight: "700", color: colors.text, minWidth: 40, textAlign: "center" },
+  quote: { marginTop: spacing.md, gap: spacing.sm, backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.md },
+  quoteRow: { flexDirection: "row", justifyContent: "space-between" },
+  quoteTotal: { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm },
+  quoteKey: { ...typography.body, color: colors.textMuted },
+  quoteVal: { ...typography.bodyMedium, color: colors.text, fontWeight: "700" },
   features: { gap: spacing.sm + 2 },
   featureRow: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm + 2 },
   checkWrap: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: colors.accentDim,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 1,
+    width: 18, height: 18, borderRadius: 9, backgroundColor: colors.accentDim,
+    alignItems: "center", justifyContent: "center", marginTop: 1,
   },
   checkMark: { fontSize: 11, color: colors.accent, fontWeight: "700" },
   featureText: { ...typography.body, color: colors.textMuted, flex: 1, lineHeight: 21 },

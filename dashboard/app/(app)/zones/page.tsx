@@ -1,3 +1,4 @@
+//dashboard\app\(app)\zones\page.tsx
 "use client";
 
 import { useEffect, useState } from "react";

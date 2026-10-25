@@ -1,86 +1,44 @@
-export type BillingPeriod = "monthly" | "annual";
-
-export interface Plan {
-  id: string;
-  name: string;
-  /** Short line under the plan name explaining who it's for. */
-  tagline: string;
-  monthlyPrice: number;
-  /** Effective per-month price when billed annually. */
-  annualMonthlyPrice: number;
-  currency: string;
-  features: string[];
-  /** Highlighted as the default/suggested choice. */
-  recommended?: boolean;
-  /** Renders as "Contact us" rather than a price. */
-  custom?: boolean;
-  /** Free plan -- shows "Free" instead of a price, and a different CTA. */
-  free?: boolean;
-}
-
 /**
- * Salesman pricing. Free tier is a real free plan (no card required);
- * paid tiers are billed in USD.
- * Annual pricing gives ~2 months free (16-17% off) -- adjust if the
- * commercial terms change.
+ * Salesman pricing for the mobile app. Mirrors dashboard/lib/plans.ts --
+ * keep the two in step when commercial terms change.
+ *
+ * Commercial model: priced per branch. Each branch has a one-time setup fee
+ * and a monthly subscription. Prices in USD, excluding VAT.
  */
-export const plans: Plan[] = [
-  {
-    id: "free",
-    name: "Free",
-    tagline: "Get your catalog and orders out of spreadsheets",
-    monthlyPrice: 0,
-    annualMonthlyPrice: 0,
-    currency: "USD",
-    free: true,
-    features: [
-      "Up to 50 orders / month",
-      "AI ordering agent over WhatsApp",
-      "Live pricing & inventory",
-      "Up to 2 team members",
-      "Community support",
-    ],
-  },
-  {
-    id: "growth",
-    name: "Growth",
-    tagline: "For distributors running a delivery fleet",
-    monthlyPrice: 35,
-    annualMonthlyPrice: 29,
-    currency: "USD",
-    recommended: true,
-    features: [
-      "Up to 2,000 orders / month",
-      "Everything in Free",
-      "Delivery zones & auto-assignment",
-      "Driver & dispatcher apps",
-      "Unlimited team members",
-      "Daily reports & print queue",
-      "Priority support",
-    ],
-  },
-  {
-    id: "scale",
-    name: "Scale",
-    tagline: "For multi-branch and high-volume operations",
-    monthlyPrice: 200,
-    annualMonthlyPrice: 167,
-    currency: "USD",
-    features: [
-      "Unlimited orders",
-      "Everything in Growth",
-      "Multi-branch operations",
-      "Cost & margin analytics",
-      "Dedicated onboarding",
-      "Custom integrations",
-      "SLA & account manager",
-    ],
-  },
+export const PRICING = {
+  currency: "USD",
+  setupPerBranch: 11000,
+  monthlyPerBranch: 1050,
+  maxBranches: 50,
+} as const;
+
+/** Only capabilities Salesman has today. */
+export const INCLUDED_FEATURES: string[] = [
+  "AI salesman on WhatsApp — Arabic and English, text and voice notes",
+  "Quotes from your active price list, uploaded from your Excel sheet",
+  "Live stock on every quote, with your team approving exceptions",
+  "Orders, warehouse print queue and delivery zones with auto-assignment",
+  "Driver and dispatcher apps",
+  "Daily PDF reports and owner analytics (margins, cost prices)",
+  "Setup and onboarding by the Stonic team",
 ];
 
-/** Percentage saved by paying annually, derived from the Growth plan. */
-export function annualSavingsPercent(plan: Plan): number {
-  if (plan.custom || plan.free || plan.monthlyPrice === 0) return 0;
-  const saved = (plan.monthlyPrice - plan.annualMonthlyPrice) / plan.monthlyPrice;
-  return Math.round(saved * 100);
+export const SALES_EMAIL = "ahmedirfanmail@gmail.com";
+
+export interface Quote {
+  branches: number;
+  setup: number;
+  monthly: number;
+  firstYear: number;
+}
+
+export function quote(branches: number): Quote {
+  const b = Math.min(PRICING.maxBranches, Math.max(1, Math.floor(branches) || 1));
+  const setup = b * PRICING.setupPerBranch;
+  const monthly = b * PRICING.monthlyPerBranch;
+  return { branches: b, setup, monthly, firstYear: setup + monthly * 12 };
+}
+
+export function formatMoney(n: number): string {
+  return `$${n.toLocaleString("en-US")}`;
 }

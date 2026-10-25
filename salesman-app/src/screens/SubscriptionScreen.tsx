@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
   View,
   Text,
@@ -8,92 +8,56 @@ import {
   SafeAreaView,
   Platform,
   StatusBar,
+  Linking,
 } from "react-native";
 import { colors, radius, spacing, typography } from "../theme/theme";
-import { plans, annualSavingsPercent, type BillingPeriod } from "../data/plans";
+import { SALES_EMAIL, quote } from "../data/plans";
 import { PlanCard } from "../components/PlanCard";
-import { BillingToggle } from "../components/BillingToggle";
 
 interface Props {
-  /** Called with the chosen plan id once the user continues. Wire this to
-   *  the real checkout/payment flow when billing is implemented. */
-  onContinue?: (planId: string, period: BillingPeriod) => void;
-  /** Lets an existing customer skip straight to sign-in. */
+  /** Lets an existing customer go straight to sign-in. Accounts are created
+   *  by an admin from the web dashboard's Team & Access page. */
   onSignIn?: () => void;
 }
 
-export function SubscriptionScreen({ onContinue, onSignIn }: Props) {
-  const [period, setPeriod] = useState<BillingPeriod>("annual");
-  const recommended = plans.find((p) => p.recommended) ?? plans[0];
-  const [selectedId, setSelectedId] = useState<string>(recommended.id);
+export function SubscriptionScreen({ onSignIn }: Props) {
+  const [branches, setBranches] = useState(1);
 
-  const savings = useMemo(() => annualSavingsPercent(recommended), [recommended]);
-  const selectedPlan = plans.find((p) => p.id === selectedId) ?? recommended;
+  function contactSales() {
+    const b = quote(branches).branches;
+    const subject = encodeURIComponent(`Salesman pilot — ${b} branch${b === 1 ? "" : "es"}`);
+    Linking.openURL(`mailto:${SALES_EMAIL}?subject=${subject}`).catch(() => {});
+  }
 
   return (
     <SafeAreaView style={styles.safe}>
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <View style={styles.brandRow}>
           <Text style={styles.brand}>SALESMAN</Text>
-          <Text style={styles.byline}>by Sonic</Text>
+          <Text style={styles.byline}>by Stonic</Text>
         </View>
 
-        <Text style={styles.headline}>
-          Run your orders and deliveries on autopilot.
-        </Text>
+        <Text style={styles.headline}>Run your orders and deliveries on autopilot.</Text>
         <Text style={styles.sub}>
-          Your customers keep ordering on WhatsApp. Salesman handles the
-          pricing, the stock, and the delivery behind it.
+          Your customers keep ordering on WhatsApp. Salesman handles the pricing, the stock, and the delivery
+          behind it.
         </Text>
 
-        <View style={styles.toggleWrap}>
-          <BillingToggle
-            value={period}
-            onChange={setPeriod}
-            savingsPercent={savings}
-          />
-        </View>
+        <View style={{ height: spacing.lg }} />
+        <PlanCard branches={branches} onBranchesChange={setBranches} />
 
-        {plans.map((plan) => (
-          <PlanCard
-            key={plan.id}
-            plan={plan}
-            period={period}
-            selected={plan.id === selectedId}
-            onSelect={setSelectedId}
-          />
-        ))}
-
-        <Text style={styles.finePrint}>
-          Free plan needs no card. Paid prices exclude VAT and are billed in
-          USD. Cancel anytime. Limits apply per organization, not per user.
-        </Text>
+        <Text style={styles.finePrint}>Prices in USD, excluding VAT.</Text>
       </ScrollView>
 
       {/* Sticky action footer -- keeps the primary CTA reachable without scrolling */}
       <View style={styles.footer}>
         <Pressable
           style={styles.cta}
-          onPress={() => onContinue?.(selectedPlan.id, period)}
+          onPress={contactSales}
           accessibilityRole="button"
-          accessibilityLabel={
-            selectedPlan.custom
-              ? "Contact sales about this plan"
-              : selectedPlan.free
-              ? "Start using the Free plan"
-              : `Continue with the ${selectedPlan.name} plan`
-          }
+          accessibilityLabel="Email the Stonic team about a pilot"
         >
-          <Text style={styles.ctaText}>
-            {selectedPlan.custom
-              ? "Contact sales"
-              : selectedPlan.free
-              ? "Start free"
-              : `Continue with ${selectedPlan.name}`}
-          </Text>
+          <Text style={styles.ctaText}>Talk to us about a pilot</Text>
         </Pressable>
 
         <Pressable
@@ -117,34 +81,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
     paddingTop: Platform.OS === "android" ? StatusBar.currentHeight ?? 0 : 0,
   },
-  scroll: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.xl,
-  },
+  scroll: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.xl },
   brandRow: { flexDirection: "row", alignItems: "baseline", gap: spacing.sm },
   brand: { ...typography.heading, color: colors.text, letterSpacing: 1.5 },
   byline: { ...typography.caption, color: colors.textDim },
-  headline: {
-    ...typography.display,
-    color: colors.text,
-    marginTop: spacing.lg,
-    lineHeight: 38,
-  },
-  sub: {
-    ...typography.body,
-    color: colors.textMuted,
-    marginTop: spacing.sm + 2,
-    lineHeight: 22,
-  },
-  toggleWrap: { marginTop: spacing.lg, marginBottom: spacing.lg },
-  finePrint: {
-    ...typography.caption,
-    color: colors.textDim,
-    textAlign: "center",
-    lineHeight: 18,
-    marginTop: spacing.sm,
-  },
+  headline: { ...typography.display, color: colors.text, marginTop: spacing.lg, lineHeight: 38 },
+  sub: { ...typography.body, color: colors.textMuted, marginTop: spacing.sm + 2, lineHeight: 22 },
+  finePrint: { ...typography.caption, color: colors.textDim, textAlign: "center", lineHeight: 18, marginTop: spacing.sm },
   footer: {
     borderTopWidth: 1,
     borderTopColor: colors.border,
@@ -154,12 +97,7 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.lg,
     gap: spacing.sm + 4,
   },
-  cta: {
-    backgroundColor: colors.accent,
-    borderRadius: radius.pill,
-    paddingVertical: 16,
-    alignItems: "center",
-  },
+  cta: { backgroundColor: colors.accent, borderRadius: radius.pill, paddingVertical: 16, alignItems: "center" },
   ctaText: { ...typography.heading, color: colors.white },
   signInWrap: { alignItems: "center" },
   signInText: { ...typography.caption, color: colors.textMuted },

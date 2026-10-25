@@ -24,6 +24,10 @@ class Capability(str, Enum):
     VIEW_REPORTS = "view_reports"
     VIEW_PRINTING = "view_printing"
     VIEW_CONVERSATIONS = "view_conversations"
+    # Margins, costs and customer-health data are commercially sensitive, so
+    # they get their own capability rather than riding on VIEW_REPORTS
+    # (which salesmen and viewers have). Owner/admin only, via _ALL.
+    VIEW_ANALYTICS = "view_analytics"
 
 
 _ALL = set(Capability)
