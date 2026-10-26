@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import select
 
+from app.core.branches import default_branch
 from app.db.models.customer import Customer
 from app.db.models.order import Order
 from app.db.models.order_event import OrderEvent
@@ -53,7 +54,8 @@ async def _product(db, tenant_id, *, sku="APPLE", name="Apples"):
 async def _order(db, tenant_id, *, status="completed", created=None,
                  customer_id=None, customer_name=None, number="ORD-1"):
     o = Order(
-        tenant_id=tenant_id, order_number=number, status=status,
+        tenant_id=tenant_id, branch_id=(await default_branch(db, tenant_id)).id,
+        order_number=number, status=status,
         created_at=created or _ago(days=1),
         customer_id=customer_id, customer_name=customer_name,
     )
@@ -133,7 +135,7 @@ async def test_cancelled_orders_excluded_from_margins(db):
 async def test_weekly_customer_flagged_after_long_gap(db):
     """A customer who ordered weekly and has been silent 30 days is drifting."""
     t = await _tenant(db)
-    c = Customer(tenant_id=t.id, name="Souq Weekly")
+    c = Customer(tenant_id=t.id, branch_id=(await default_branch(db, t.id)).id, name="Souq Weekly")
     db.add(c)
     await db.flush()
     for i in range(5):
@@ -149,7 +151,7 @@ async def test_weekly_customer_flagged_after_long_gap(db):
 
 async def test_customer_ordering_on_schedule_not_flagged(db):
     t = await _tenant(db)
-    c = Customer(tenant_id=t.id, name="Souq Regular")
+    c = Customer(tenant_id=t.id, branch_id=(await default_branch(db, t.id)).id, name="Souq Regular")
     db.add(c)
     await db.flush()
     for i in range(5):
@@ -163,7 +165,7 @@ async def test_customer_ordering_on_schedule_not_flagged(db):
 async def test_customer_with_too_little_history_not_flagged(db):
     """Two orders isn't a pattern -- don't cry wolf."""
     t = await _tenant(db)
-    c = Customer(tenant_id=t.id, name="Newcomer")
+    c = Customer(tenant_id=t.id, branch_id=(await default_branch(db, t.id)).id, name="Newcomer")
     db.add(c)
     await db.flush()
     await _order(db, t.id, customer_id=c.id, created=_ago(days=200), number="N-1")

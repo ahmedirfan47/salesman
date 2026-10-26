@@ -10,6 +10,7 @@ class CustomerCreate(BaseModel):
     whatsapp_number: str | None = None
     address: str | None = None
     zone_id: uuid.UUID | None = None
+    branch_id: uuid.UUID | None = None  # defaults to the zone's branch, else your branch
 
 
 class CustomerUpdate(BaseModel):
@@ -18,12 +19,14 @@ class CustomerUpdate(BaseModel):
     whatsapp_number: str | None = None
     address: str | None = None
     zone_id: uuid.UUID | None = None
+    branch_id: uuid.UUID | None = None
     is_active: bool | None = None
 
 
 class CustomerOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
+    branch_id: uuid.UUID
     name: str
     company: str | None
     whatsapp_number: str | None

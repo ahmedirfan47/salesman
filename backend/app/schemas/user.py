@@ -13,11 +13,14 @@ class UserOut(BaseModel):
     full_name: str | None
     role: str
     is_active: bool
+    branch_id: uuid.UUID | None = None
     created_at: datetime
 
 
 class MeOut(UserOut):
     capabilities: list[str] = []
+    branch_name: str | None = None
+    sees_all_branches: bool = True
 
 
 class UserCreate(BaseModel):
@@ -25,8 +28,10 @@ class UserCreate(BaseModel):
     password: str
     full_name: str | None = None
     role: str = "salesman"
+    branch_id: uuid.UUID | None = None  # required for branch staff; owners/admins see all
 
 
 class UserRoleUpdate(BaseModel):
     role: str | None = None
     is_active: bool | None = None
+    branch_id: uuid.UUID | None = None  # send null to clear

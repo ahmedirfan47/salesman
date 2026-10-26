@@ -3,6 +3,7 @@ import uuid
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 
+from app.core.branches import BranchScope, in_scope
 from app.core.deps import CurrentUser, DBSession
 from app.db.models.conversation import Conversation
 from app.db.models.message import Message
@@ -12,25 +13,24 @@ router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 
 @router.get("", response_model=list[ConversationOut])
-async def list_conversations(db: DBSession, user: CurrentUser) -> list[ConversationOut]:
-    rows = await db.scalars(
-        select(Conversation)
-        .where(Conversation.tenant_id == user.tenant_id)
-        .order_by(Conversation.last_message_at.desc().nullslast())
-    )
+async def list_conversations(db: DBSession, user: CurrentUser, scope: BranchScope) -> list[ConversationOut]:
+    q = select(Conversation).where(Conversation.tenant_id == user.tenant_id)
+    if scope is not None:
+        q = q.where(Conversation.branch_id == scope)
+    rows = await db.scalars(q.order_by(Conversation.last_message_at.desc().nullslast()))
     return list(rows)
 
 
 @router.get("/{conversation_id}/messages", response_model=list[MessageOut])
 async def list_messages(
-    conversation_id: uuid.UUID, db: DBSession, user: CurrentUser
+    conversation_id: uuid.UUID, db: DBSession, user: CurrentUser, scope: BranchScope
 ) -> list[MessageOut]:
     conv = await db.scalar(
         select(Conversation).where(
             Conversation.id == conversation_id, Conversation.tenant_id == user.tenant_id
         )
     )
-    if not conv:
+    if not conv or not in_scope(scope, conv.branch_id):
         raise HTTPException(404, "Conversation not found")
     rows = await db.scalars(
         select(Message)

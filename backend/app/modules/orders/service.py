@@ -12,6 +12,9 @@ create_order():
 
 Hard rule: an order is NEVER confirmed for a quantity beyond available stock
 without explicit human approval.
+
+Every order belongs to one branch: it is priced from that branch's price list
+and takes stock from that branch's inventory.
 """
 import uuid
 from datetime import datetime, timezone
@@ -21,6 +24,8 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.branches import default_branch, get_branch, in_scope
+from app.db.models.customer import Customer
 from app.db.models.escalation import Escalation
 from app.db.models.inventory import Inventory
 from app.db.models.inventory_transaction import InventoryTransaction
@@ -29,6 +34,7 @@ from app.db.models.order_event import OrderEvent
 from app.db.models.order_item import OrderItem
 from app.db.models.product import Product
 from app.db.models.product_price import ProductPrice
+from app.modules.notifications import service as notifications
 from app.modules.printing import service as printing_service
 from app.schemas.order import OrderCreate
 
@@ -41,7 +47,7 @@ async def _generate_order_number(db: AsyncSession, tenant_id: uuid.UUID) -> str:
 
 
 async def _current_price_row(
-    db: AsyncSession, tenant_id: uuid.UUID, sku: str
+    db: AsyncSession, tenant_id: uuid.UUID, branch_id: uuid.UUID, sku: str
 ) -> tuple[Product, ProductPrice] | None:
     row = await db.execute(
         select(Product, ProductPrice)
@@ -49,10 +55,30 @@ async def _current_price_row(
         .where(
             Product.tenant_id == tenant_id,
             Product.sku == sku,
+            ProductPrice.branch_id == branch_id,
             ProductPrice.effective_to.is_(None),
         )
     )
     return row.first()
+
+
+async def _order_branch(
+    db: AsyncSession, tenant_id: uuid.UUID, requested: uuid.UUID | None,
+    customer: Customer | None, scope: uuid.UUID | None,
+) -> uuid.UUID:
+    """Explicit branch, else the customer's branch, else the caller's branch, else the default."""
+    if requested is not None:
+        await get_branch(db, tenant_id, requested)
+        branch_id = requested
+    elif customer is not None:
+        branch_id = customer.branch_id
+    elif scope is not None:
+        branch_id = scope
+    else:
+        branch_id = (await default_branch(db, tenant_id)).id
+    if not in_scope(scope, branch_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "That branch is outside your access")
+    return branch_id
 
 
 async def create_order(
@@ -61,6 +87,7 @@ async def create_order(
     data: OrderCreate,
     *,
     actor_id: uuid.UUID | None = None,
+    scope: uuid.UUID | None = None,
 ) -> Order:
     now = datetime.now(timezone.utc)
 
@@ -70,8 +97,8 @@ async def create_order(
     cust_name = data.customer_name
     cust_company = data.customer_company
     cust_whatsapp = data.whatsapp_number
+    customer = None
     if getattr(data, "customer_id", None):
-        from app.db.models.customer import Customer
         customer = await db.scalar(
             select(Customer).where(
                 Customer.id == data.customer_id, Customer.tenant_id == tenant_id
@@ -84,23 +111,29 @@ async def create_order(
         cust_company = cust_company or customer.company
         cust_whatsapp = cust_whatsapp or customer.whatsapp_number
 
+    branch_id = await _order_branch(db, tenant_id, data.branch_id, customer, scope)
+
     # 1. resolve every line to product + current price, collecting shortfalls
     resolved: list[dict] = []
     shortfalls: list[dict] = []
 
     for line in data.items:
-        found = await _current_price_row(db, tenant_id, line.sku)
+        found = await _current_price_row(db, tenant_id, branch_id, line.sku)
         if not found:
             raise HTTPException(
                 status.HTTP_404_NOT_FOUND,
-                f"No active price for SKU '{line.sku}'. Cannot price this order.",
+                f"No active price for SKU '{line.sku}' at this branch. Cannot price this order.",
             )
         product, price = found
 
-        # lock the inventory row for this product
+        # lock this branch's inventory row for this product
         inv = await db.scalar(
             select(Inventory)
-            .where(Inventory.tenant_id == tenant_id, Inventory.product_id == product.id)
+            .where(
+                Inventory.tenant_id == tenant_id,
+                Inventory.branch_id == branch_id,
+                Inventory.product_id == product.id,
+            )
             .with_for_update()
         )
         available = inv.quantity_on_hand if inv else 0
@@ -124,6 +157,7 @@ async def create_order(
     if shortfalls:
         order = Order(
             tenant_id=tenant_id,
+            branch_id=branch_id,
             order_number=order_number,
             customer_id=getattr(data, "customer_id", None),
             customer_name=cust_name,
@@ -164,6 +198,7 @@ async def create_order(
         db.add(
             Escalation(
                 tenant_id=tenant_id,
+                branch_id=branch_id,
                 reason_type="insufficient_stock",
                 context={"order_number": order_number, "shortfalls": shortfalls},
                 ai_recommendation=f"Insufficient stock -> {rec}. Approve partial/backorder or reject.",
@@ -180,6 +215,7 @@ async def create_order(
     # 2b. all in stock -> confirm atomically
     order = Order(
         tenant_id=tenant_id,
+        branch_id=branch_id,
         order_number=order_number,
         customer_id=getattr(data, "customer_id", None),
         customer_name=cust_name,
@@ -220,6 +256,7 @@ async def create_order(
         db.add(
             InventoryTransaction(
                 tenant_id=tenant_id,
+                branch_id=branch_id,
                 product_id=e["product"].id,
                 delta=-e["quantity"],
                 quantity_before=before,
@@ -255,27 +292,32 @@ async def create_order(
     return order
 
 
-async def list_orders(db: AsyncSession, tenant_id: uuid.UUID) -> list[Order]:
-    return list(
-        await db.scalars(
-            select(Order).where(Order.tenant_id == tenant_id).order_by(Order.created_at.desc())
-        )
-    )
+async def list_orders(
+    db: AsyncSession, tenant_id: uuid.UUID, scope: uuid.UUID | None = None
+) -> list[Order]:
+    q = select(Order).where(Order.tenant_id == tenant_id)
+    if scope is not None:
+        q = q.where(Order.branch_id == scope)
+    return list(await db.scalars(q.order_by(Order.created_at.desc())))
 
 
-async def get_order(db: AsyncSession, tenant_id: uuid.UUID, order_id: uuid.UUID) -> Order:
+async def get_order(
+    db: AsyncSession, tenant_id: uuid.UUID, order_id: uuid.UUID, scope: uuid.UUID | None = None
+) -> Order:
     order = await db.scalar(
         select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id)
     )
-    if not order:
+    if not order or not in_scope(scope, order.branch_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Order not found")
     return order
 
 
 async def list_escalations(
-    db: AsyncSession, tenant_id: uuid.UUID, *, open_only: bool = True
+    db: AsyncSession, tenant_id: uuid.UUID, *, open_only: bool = True, scope: uuid.UUID | None = None
 ) -> list[Escalation]:
     stmt = select(Escalation).where(Escalation.tenant_id == tenant_id)
+    if scope is not None:
+        stmt = stmt.where(Escalation.branch_id == scope)
     if open_only:
         stmt = stmt.where(Escalation.status == "open")
     return list(await db.scalars(stmt.order_by(Escalation.created_at.desc())))
@@ -289,9 +331,11 @@ async def resolve_escalation(
     approve: bool,
     note: str | None = None,
     actor_id: uuid.UUID | None = None,
+    scope: uuid.UUID | None = None,
 ) -> Escalation:
     """Human decision on a held order. Approve -> fulfil what stock allows and
-    confirm; reject -> cancel the order. Either way the escalation is closed."""
+    confirm; reject -> cancel the order. Either way the escalation is closed,
+    and the customer is told on WhatsApp."""
     now = datetime.now(timezone.utc)
 
     esc = await db.scalar(
@@ -299,7 +343,7 @@ async def resolve_escalation(
             Escalation.id == escalation_id, Escalation.tenant_id == tenant_id
         )
     )
-    if not esc:
+    if not esc or not in_scope(scope, esc.branch_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Escalation not found")
     if esc.status != "open":
         raise HTTPException(status.HTTP_409_CONFLICT, "Escalation already resolved")
@@ -308,17 +352,26 @@ async def resolve_escalation(
     if esc.order_id:
         order = await db.scalar(select(Order).where(Order.id == esc.order_id))
 
+    shorted: list[dict] = []
     if approve and order is not None:
-        # fulfil each line up to available stock (partial fulfilment)
-        for item in order.items:
+        # fulfil each line up to available stock at the order's branch (partial fulfilment)
+        for item in list(order.items):
             inv = await db.scalar(
                 select(Inventory)
-                .where(Inventory.tenant_id == tenant_id, Inventory.product_id == item.product_id)
+                .where(
+                    Inventory.tenant_id == tenant_id,
+                    Inventory.branch_id == order.branch_id,
+                    Inventory.product_id == item.product_id,
+                )
                 .with_for_update()
             )
             available = inv.quantity_on_hand if inv else 0
             fulfil = min(item.quantity, available)
+            if fulfil < item.quantity:
+                shorted.append({"sku": item.sku, "name": item.product_name,
+                                "requested": item.quantity, "supplied": max(fulfil, 0)})
             if fulfil <= 0:
+                order.items.remove(item)  # none in stock: the line is dropped, not sent at full quantity
                 continue
             before = available
             after = before - fulfil
@@ -328,6 +381,7 @@ async def resolve_escalation(
             db.add(
                 InventoryTransaction(
                     tenant_id=tenant_id,
+                    branch_id=order.branch_id,
                     product_id=item.product_id,
                     delta=-fulfil,
                     quantity_before=before,
@@ -338,6 +392,14 @@ async def resolve_escalation(
                     created_by=actor_id,
                 )
             )
+    if approve and order is not None and not order.items:
+        # nothing at all could be supplied: approving means cancelling
+        approve = False
+        note = f"{note}. " if note else ""
+        note += "Approved, but nothing was in stock, so the order was cancelled."
+        order.status = "cancelled"
+        order.cancelled_at = now
+    elif approve and order is not None:
         order.total_amount = sum(
             (Decimal(str(i.line_total)) for i in order.items), Decimal("0")
         )
@@ -370,6 +432,10 @@ async def resolve_escalation(
 
     await db.commit()
     await db.refresh(esc)
+    if order is not None:
+        await notifications.queue_order_update(
+            db, order, "approved" if approve else "rejected", {"shorted": shorted}
+        )
     return esc
 
 
@@ -399,11 +465,12 @@ async def transition_order(
     actor_id: uuid.UUID | None = None,
     actor_name: str | None = None,
     note: str | None = None,
+    scope: uuid.UUID | None = None,
 ) -> Order:
     order = await db.scalar(
         select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id)
     )
-    if not order:
+    if not order or not in_scope(scope, order.branch_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Order not found")
 
     current = order.status
@@ -432,6 +499,8 @@ async def transition_order(
     ))
     await db.commit()
     await db.refresh(order)
+    if to_status in notifications.STATUS_EVENTS:
+        await notifications.queue_order_update(db, order, to_status)
     return order
 
 

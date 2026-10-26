@@ -1,10 +1,13 @@
 import hashlib
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from sqlalchemy import select
 
+from app.core.branches import BranchScope, in_scope, resolve_branch
 from app.core.deps import CurrentUser, DBSession, require_role
 from app.core.enums import UserRole
+from app.db.models.price_list import PriceList
 from app.modules.pricing import service
 from app.modules.pricing.excel_parser import ExcelParseError, parse_price_sheet
 from app.schemas.pricing import (
@@ -20,8 +23,8 @@ _MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
 @router.get("/price-lists", response_model=list[PriceListOut])
-async def list_price_lists(db: DBSession, user: CurrentUser) -> list[PriceListOut]:
-    return await service.list_price_lists(db, user.tenant_id)
+async def list_price_lists(db: DBSession, user: CurrentUser, scope: BranchScope) -> list[PriceListOut]:
+    return await service.list_price_lists(db, user.tenant_id, scope)
 
 
 @router.post(
@@ -31,10 +34,15 @@ async def list_price_lists(db: DBSession, user: CurrentUser) -> list[PriceListOu
     dependencies=[Depends(require_role(UserRole.ADMIN))],
 )
 async def create_price_list(
-    data: PriceListCreate, db: DBSession, user: CurrentUser
+    data: PriceListCreate,
+    db: DBSession,
+    user: CurrentUser,
+    scope: BranchScope,
+    branch_id: uuid.UUID | None = Query(None, description="branch this list is for"),
 ) -> PriceListOut:
     """Create a DRAFT price list from JSON lines (manual entry)."""
-    return await service.create_price_list(db, user.tenant_id, data, uploaded_by=user.id)
+    branch = await resolve_branch(db, user.tenant_id, scope, branch_id, required=True)
+    return await service.create_price_list(db, user.tenant_id, data, branch_id=branch, uploaded_by=user.id)
 
 
 @router.post(
@@ -46,12 +54,15 @@ async def create_price_list(
 async def upload_price_sheet(
     db: DBSession,
     user: CurrentUser,
+    scope: BranchScope,
     file: UploadFile = File(...),
+    branch_id: uuid.UUID | None = Query(None, description="branch this sheet is for"),
 ) -> PriceListOut:
-    """Upload an .xlsx price sheet -> parsed into a DRAFT price list (not yet live).
+    """Upload an .xlsx price sheet for one branch -> parsed into a DRAFT price list.
 
-    Review the draft, then call /activate to make it the active price/stock.
+    Review the draft, then call /activate to make it that branch's live prices and stock.
     """
+    branch = await resolve_branch(db, user.tenant_id, scope, branch_id, required=True)
     filename = file.filename or "upload.xlsx"
     if not filename.lower().endswith(".xlsx"):
         raise HTTPException(
@@ -75,7 +86,7 @@ async def upload_price_sheet(
 
     data = PriceListCreate(source_filename=filename, lines=lines)
     return await service.create_price_list(
-        db, user.tenant_id, data, uploaded_by=user.id, file_hash=file_hash
+        db, user.tenant_id, data, branch_id=branch, uploaded_by=user.id, file_hash=file_hash
     )
 
 
@@ -85,14 +96,20 @@ async def upload_price_sheet(
     dependencies=[Depends(require_role(UserRole.ADMIN))],
 )
 async def activate_price_list(
-    price_list_id: uuid.UUID, db: DBSession, user: CurrentUser
+    price_list_id: uuid.UUID, db: DBSession, user: CurrentUser, scope: BranchScope
 ) -> PriceListOut:
+    branch_id = await db.scalar(
+        select(PriceList.branch_id).where(PriceList.id == price_list_id, PriceList.tenant_id == user.tenant_id)
+    )
+    if branch_id is None or not in_scope(scope, branch_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Price list not found")
     return await service.activate_price_list(db, user.tenant_id, price_list_id, actor_id=user.id)
 
 
 @router.get("/current/{sku}", response_model=CurrentPriceOut)
-async def get_current_price(sku: str, db: DBSession, user: CurrentUser) -> CurrentPriceOut:
-    result = await service.get_current_price(db, user.tenant_id, sku)
+async def get_current_price(sku: str, db: DBSession, user: CurrentUser, scope: BranchScope) -> CurrentPriceOut:
+    branch = await resolve_branch(db, user.tenant_id, scope)
+    result = await service.get_current_price(db, user.tenant_id, sku, branch)
     if not result:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No active price for SKU '{sku}'")
     return result
@@ -100,6 +117,6 @@ async def get_current_price(sku: str, db: DBSession, user: CurrentUser) -> Curre
 
 @router.get("/history/{product_id}", response_model=list[ProductPriceOut])
 async def price_history(
-    product_id: uuid.UUID, db: DBSession, user: CurrentUser
+    product_id: uuid.UUID, db: DBSession, user: CurrentUser, scope: BranchScope
 ) -> list[ProductPriceOut]:
-    return await service.price_history(db, user.tenant_id, product_id)
+    return await service.price_history(db, user.tenant_id, product_id, scope)

@@ -6,6 +6,7 @@ import httpx
 import pytest
 import pytest_asyncio
 
+from app.core.branches import default_branch
 from app.core.security import create_access_token, hash_password
 from app.db.models.order import Order
 from app.db.models.order_item import OrderItem
@@ -58,11 +59,12 @@ async def _product(db, tenant, sku, price=None, currency="SAR"):
     db.add(p)
     await db.flush()
     if price is not None:
-        pl = PriceList(tenant_id=tenant.id, version=1, status="active")
+        branch = await default_branch(db, tenant.id)
+        pl = PriceList(tenant_id=tenant.id, branch_id=branch.id, version=1, status="active")
         db.add(pl)
         await db.flush()
         db.add(ProductPrice(
-            tenant_id=tenant.id, product_id=p.id, price_list_id=pl.id, unit_price=price,
+            tenant_id=tenant.id, branch_id=branch.id, product_id=p.id, price_list_id=pl.id, unit_price=price,
             currency=currency, effective_from=datetime.now(timezone.utc) - timedelta(days=1),
         ))
         await db.flush()
@@ -70,7 +72,8 @@ async def _product(db, tenant, sku, price=None, currency="SAR"):
 
 
 async def _sale(db, tenant, product, *, qty, price, cost, number, status="completed"):
-    o = Order(tenant_id=tenant.id, order_number=number, status=status, currency="SAR",
+    o = Order(tenant_id=tenant.id, branch_id=(await default_branch(db, tenant.id)).id,
+              order_number=number, status=status, currency="SAR",
               created_at=datetime.now(timezone.utc) - timedelta(days=1))
     db.add(o)
     await db.flush()

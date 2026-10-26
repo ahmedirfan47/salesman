@@ -21,7 +21,7 @@ async def list_users(db: DBSession, user: CurrentUser) -> list[UserOut]:
 async def create_user(data: UserCreate, db: DBSession, user: CurrentUser) -> UserOut:
     return await service.create_user(
         db, user.tenant_id, email=data.email, password=data.password,
-        full_name=data.full_name, role=data.role,
+        full_name=data.full_name, role=data.role, branch_id=data.branch_id,
     )
 
 
@@ -29,7 +29,8 @@ async def create_user(data: UserCreate, db: DBSession, user: CurrentUser) -> Use
 async def update_user(
     user_id: uuid.UUID, data: UserRoleUpdate, db: DBSession, user: CurrentUser
 ) -> UserOut:
+    fields = data.model_dump(exclude_unset=True)
     return await service.update_user(
         db, user.tenant_id, user_id, role=data.role, is_active=data.is_active,
-        acting_user_id=user.id,
+        acting_user_id=user.id, branch_id=data.branch_id, set_branch="branch_id" in fields,
     )

@@ -10,7 +10,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 
 from fpdf import FPDF
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.inventory import Inventory
@@ -28,20 +28,20 @@ def _sanitize(text: str) -> str:
 
 
 async def compute_daily_summary(
-    db: AsyncSession, tenant_id: uuid.UUID, day: date
+    db: AsyncSession, tenant_id: uuid.UUID, day: date, scope: uuid.UUID | None = None
 ) -> dict:
+    """One day's sales for one branch, or for all branches when scope is None."""
     start = datetime.combine(day, time.min, tzinfo=timezone.utc)
     end = start + timedelta(days=1)
 
-    orders = list(
-        await db.scalars(
-            select(Order).where(
-                Order.tenant_id == tenant_id,
-                Order.created_at >= start,
-                Order.created_at < end,
-            ).order_by(Order.created_at)
-        )
+    q = select(Order).where(
+        Order.tenant_id == tenant_id,
+        Order.created_at >= start,
+        Order.created_at < end,
     )
+    if scope is not None:
+        q = q.where(Order.branch_id == scope)
+    orders = list(await db.scalars(q.order_by(Order.created_at)))
 
     total_orders = len(orders)
     confirmed = [o for o in orders if o.status in _CONFIRMED]
@@ -69,17 +69,19 @@ async def compute_daily_summary(
 
     products_sold = sorted(product_rows.values(), key=lambda r: r["revenue"], reverse=True)
 
-    # current remaining stock snapshot
-    stock_rows = list(
-        await db.execute(
-            select(Product.sku, Product.name_en, Inventory.quantity_on_hand)
-            .join(Inventory, Inventory.product_id == Product.id)
-            .where(Product.tenant_id == tenant_id)
-            .order_by(Product.sku)
-        )
+    # current remaining stock snapshot (summed across branches when looking at all)
+    stock_q = (
+        select(Product.sku, Product.name_en, func.sum(Inventory.quantity_on_hand))
+        .join(Inventory, Inventory.product_id == Product.id)
+        .where(Product.tenant_id == tenant_id)
+        .group_by(Product.sku, Product.name_en)
+        .order_by(Product.sku)
     )
+    if scope is not None:
+        stock_q = stock_q.where(Inventory.branch_id == scope)
+    stock_rows = list(await db.execute(stock_q))
     remaining_stock = [
-        {"sku": sku, "name": name, "quantity": qty} for sku, name, qty in stock_rows
+        {"sku": sku, "name": name, "quantity": int(qty or 0)} for sku, name, qty in stock_rows
     ]
 
     currency = confirmed[0].currency if confirmed else (orders[0].currency if orders else "USD")

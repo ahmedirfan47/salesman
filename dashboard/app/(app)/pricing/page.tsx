@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api, uploadFile } from "@/lib/api";
+import { useAllBranchesView, useBranches } from "@/lib/branches";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Upload, CheckCircle2, FileSpreadsheet } from "lucide-react";
@@ -9,6 +10,7 @@ import { TableScroll } from "@/components/table-scroll";
 
 type PriceList = {
   id: string;
+  branch_id: string;
   version: number;
   source_filename: string | null;
   status: string;
@@ -24,6 +26,9 @@ const statusColor: Record<string, string> = {
 };
 
 export default function PricingPage() {
+  const { branches, current, nameOf } = useBranches();
+  const allView = useAllBranchesView();
+  const [uploadBranch, setUploadBranch] = useState("");
   const [lists, setLists] = useState<PriceList[]>([]);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
@@ -44,8 +49,10 @@ export default function PricingPage() {
     setMsg("");
     setBusy(true);
     try {
-      const pl = await uploadFile("/pricing/price-lists/upload", file);
-      setMsg(`Uploaded "${pl.source_filename}" as version ${pl.version} (draft). Review, then activate.`);
+      const target = allView ? uploadBranch : "";
+      const pl = await uploadFile(`/pricing/price-lists/upload${target ? `?branch_id=${target}` : ""}`, file);
+      const where = nameOf(pl.branch_id);
+      setMsg(`Uploaded "${pl.source_filename}"${where ? ` for ${where}` : ""} as version ${pl.version} (draft). Review, then activate.`);
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
@@ -60,7 +67,7 @@ export default function PricingPage() {
     setBusy(true);
     try {
       await api(`/pricing/price-lists/${id}/activate`, { method: "POST" });
-      setMsg("Price list activated. Prices and stock are now live.");
+      setMsg("Price list activated. That branch's prices and stock are now live.");
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Activation failed");
@@ -72,7 +79,10 @@ export default function PricingPage() {
   return (
     <div>
       <h1 className="mb-1 text-2xl font-bold">Pricing</h1>
-      <p className="mb-6 text-sm text-slate-500">Upload your daily price sheet (.xlsx)</p>
+      <p className="mb-6 text-sm text-slate-500">
+        Upload the daily price sheet (.xlsx) for {current ? nameOf(current) || "this branch" : branches.length > 1 ? "a branch" : "your business"}.
+        {branches.length > 1 && " Each branch has its own prices and stock."}
+      </p>
 
       <Card className="mb-6 p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
@@ -82,9 +92,16 @@ export default function PricingPage() {
           <div className="flex-1">
             <p className="font-medium">Upload a price sheet</p>
             <p className="text-sm text-slate-500">
-              Excel file with columns for SKU, Name, Price, Quantity.
+              Excel file with columns for SKU, Name, Price, Quantity, and optionally Cost.
             </p>
           </div>
+          {allView && (
+            <select value={uploadBranch} onChange={(e) => setUploadBranch(e.target.value)}
+              className="rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm">
+              <option value="">Branch…</option>
+              {branches.filter((b) => b.is_active).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          )}
           <input
             ref={fileRef}
             type="file"
@@ -93,7 +110,7 @@ export default function PricingPage() {
             className="hidden"
             id="file-upload"
           />
-          <Button disabled={busy} onClick={() => fileRef.current?.click()} className="w-full sm:w-auto">
+          <Button disabled={busy || (allView && !uploadBranch)} onClick={() => fileRef.current?.click()} className="w-full sm:w-auto">
             <Upload size={16} />
             {busy ? "Uploading…" : "Choose file"}
           </Button>
@@ -109,6 +126,7 @@ export default function PricingPage() {
             <thead className="border-b border-[var(--border)] bg-gray-50 text-left text-slate-500">
               <tr>
                 <th className="px-4 py-3 font-medium">Version</th>
+                {!current && branches.length > 1 && <th className="px-4 py-3 font-medium">Branch</th>}
                 <th className="px-4 py-3 font-medium">File</th>
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium">Uploaded</th>
@@ -119,6 +137,7 @@ export default function PricingPage() {
               {lists.map((pl) => (
                 <tr key={pl.id} className="border-b border-[var(--border)] last:border-0">
                   <td className="px-4 py-3 font-mono">v{pl.version}</td>
+                  {!current && branches.length > 1 && <td className="px-4 py-3">{nameOf(pl.branch_id)}</td>}
                   <td className="px-4 py-3">{pl.source_filename ?? "—"}</td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${statusColor[pl.status] ?? "bg-gray-100"}`}>
@@ -139,7 +158,7 @@ export default function PricingPage() {
                 </tr>
               ))}
               {lists.length === 0 && !error && (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">No price lists yet</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">No price lists yet</td></tr>
               )}
             </tbody>
           </table>

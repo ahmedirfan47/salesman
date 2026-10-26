@@ -28,6 +28,9 @@ class Prospect(UUIDPKMixin, TimestampMixin, Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True, nullable=False
     )
+    branch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), index=True, nullable=True
+    )
     kind: Mapped[str] = mapped_column(String(16), default="new", nullable=False)
     source: Mapped[str] = mapped_column(String(16), default="manual", nullable=False)  # manual|import|google|winback
     status: Mapped[str] = mapped_column(String(16), default="new", nullable=False)

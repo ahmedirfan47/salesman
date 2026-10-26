@@ -8,6 +8,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import func, select
 
+from app.core.branches import default_branch
 from app.core.security import create_access_token, hash_password
 from app.db.models.job import Job
 from app.db.models.message import Message
@@ -49,9 +50,14 @@ def session_factory(db):
     return lambda: _Ctx()
 
 
-async def _tenant(db, **kw):
-    t = Tenant(name="Al Rayyan Fresh", slug=f"t-{uuid.uuid4().hex[:10]}", **kw)
+async def _tenant(db, whatsapp_phone_number_id=None):
+    t = Tenant(name="Al Rayyan Fresh", slug=f"t-{uuid.uuid4().hex[:10]}")
     db.add(t)
+    await db.flush()
+    branch = await default_branch(db, t.id)
+    if whatsapp_phone_number_id:
+        branch.whatsapp_phone_number_id = whatsapp_phone_number_id
+        branch.whatsapp_access_token = "test-token"
     await db.flush()
     return t
 
@@ -206,7 +212,7 @@ async def test_inbound_message_is_answered_once_even_if_processed_twice(db, monk
     await db.commit()
     calls = []
 
-    async def _agent(db_, tenant_id, name, history, text):
+    async def _agent(db_, tenant_id, name, history, text, **kw):
         calls.append(text)
         return {"reply": "Tomatoes are SAR 35 today."}
 

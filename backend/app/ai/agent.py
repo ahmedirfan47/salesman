@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai import tools
 from app.ai.llm import chat
+from app.core.branches import default_branch
 
 _MAX_STEPS = 6
 
@@ -59,8 +60,18 @@ async def run_agent(
     business_name: str,
     history: list[dict],
     user_message: str,
+    *,
+    branch_id: uuid.UUID | None = None,
+    customer_number: str | None = None,
 ) -> dict:
-    """Run one customer turn. Returns {reply, steps} where steps lists any tools used."""
+    """Run one customer turn at one branch. Returns {reply, steps} where steps lists any tools used.
+
+    Prices, stock and new orders all come from `branch_id` (the branch whose
+    WhatsApp number the customer wrote to); defaults to the tenant's default branch.
+    """
+    if branch_id is None:
+        branch_id = (await default_branch(db, tenant_id)).id
+    ctx = tools.ToolContext(tenant_id=tenant_id, branch_id=branch_id, customer_number=customer_number)
     messages: list[dict] = [
         {"role": "system", "content": SYSTEM_PROMPT.format(business=business_name)},
         *history,
@@ -83,7 +94,7 @@ async def run_agent(
                 args = json.loads(tc.function.arguments or "{}")
             except json.JSONDecodeError:
                 args = {}
-            result = await tools.dispatch(db, tenant_id, tc.function.name, args)
+            result = await tools.dispatch(db, ctx, tc.function.name, args)
             steps.append({"tool": tc.function.name, "args": args, "result": result})
             messages.append(
                 {

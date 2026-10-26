@@ -57,9 +57,15 @@ async def refresh(data: RefreshRequest, db: DBSession) -> TokenResponse:
 
 
 @router.get("/me", response_model=MeOut)
-async def me(user: CurrentUser) -> MeOut:
+async def me(user: CurrentUser, db: DBSession) -> MeOut:
+    from app.core.branches import sees_all_branches
     from app.core.permissions import capabilities_for
+    from app.db.models.branch import Branch
 
     data = MeOut.model_validate(user)
     data.capabilities = sorted(c.value for c in capabilities_for(user.role))
+    data.sees_all_branches = sees_all_branches(user)
+    if user.branch_id:
+        branch = await db.get(Branch, user.branch_id)
+        data.branch_name = branch.name if branch else None
     return data

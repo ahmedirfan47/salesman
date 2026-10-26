@@ -6,6 +6,7 @@ because cost and margin data are commercially sensitive.
 """
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from app.core.branches import BranchScope, resolve_branch
 from app.core.deps import CurrentUser, DBSession, require_capability
 from app.core.permissions import Capability
 from app.modules.analytics import service
@@ -29,13 +30,15 @@ Days = Query(30, ge=1, le=365, description="Trailing window in days")
 
 
 @router.get("/summary", response_model=MarginSummaryOut)
-async def summary(db: DBSession, user: CurrentUser, days: int = Days) -> MarginSummaryOut:
-    return MarginSummaryOut.model_validate(await service.margin_summary(db, user.tenant_id, days=days))
+async def summary(db: DBSession, user: CurrentUser, scope: BranchScope, days: int = Days) -> MarginSummaryOut:
+    return MarginSummaryOut.model_validate(
+        await service.margin_summary(db, user.tenant_id, days=days, branch_id=scope)
+    )
 
 
 @router.get("/margins", response_model=list[ProductMarginOut])
-async def margins(db: DBSession, user: CurrentUser, days: int = Days) -> list[ProductMarginOut]:
-    rows = await service.product_margins(db, user.tenant_id, days=days)
+async def margins(db: DBSession, user: CurrentUser, scope: BranchScope, days: int = Days) -> list[ProductMarginOut]:
+    rows = await service.product_margins(db, user.tenant_id, days=days, branch_id=scope)
     return [ProductMarginOut.model_validate(r) for r in rows]
 
 
@@ -43,22 +46,27 @@ async def margins(db: DBSession, user: CurrentUser, days: int = Days) -> list[Pr
 async def drifting(
     db: DBSession,
     user: CurrentUser,
+    scope: BranchScope,
     min_orders: int = Query(3, ge=2, le=50),
     multiplier: float = Query(2.0, ge=1.2, le=10.0),
 ) -> list[DriftingCustomerOut]:
-    rows = await service.drifting_customers(db, user.tenant_id, min_orders=min_orders, multiplier=multiplier)
+    rows = await service.drifting_customers(
+        db, user.tenant_id, min_orders=min_orders, multiplier=multiplier, branch_id=scope
+    )
     return [DriftingCustomerOut.model_validate(r) for r in rows]
 
 
 @router.get("/stuck-orders", response_model=list[StuckOrderOut])
-async def stuck(db: DBSession, user: CurrentUser) -> list[StuckOrderOut]:
-    rows = await service.stuck_orders(db, user.tenant_id)
+async def stuck(db: DBSession, user: CurrentUser, scope: BranchScope) -> list[StuckOrderOut]:
+    rows = await service.stuck_orders(db, user.tenant_id, scope)
     return [StuckOrderOut.model_validate(r) for r in rows]
 
 
 @router.get("/product-costs", response_model=list[ProductCostOut])
-async def product_costs(db: DBSession, user: CurrentUser) -> list[ProductCostOut]:
-    rows = await service.product_costs(db, user.tenant_id)
+async def product_costs(db: DBSession, user: CurrentUser, scope: BranchScope) -> list[ProductCostOut]:
+    """Sell prices are the selected branch's (the default branch when looking at all)."""
+    branch_id = await resolve_branch(db, user.tenant_id, scope)
+    rows = await service.product_costs(db, user.tenant_id, branch_id)
     return [ProductCostOut.model_validate(r) for r in rows]
 
 

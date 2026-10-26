@@ -2,6 +2,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, Query, status
 
+from app.core.branches import BranchScope
 from app.core.deps import CurrentUser, DBSession, require_role
 from app.core.enums import UserRole
 from app.modules.products import service
@@ -24,9 +25,9 @@ async def list_products(
 
 
 @router.get("/catalog", response_model=list[ProductCatalogRow])
-async def product_catalog(db: DBSession, user: CurrentUser) -> list[ProductCatalogRow]:
+async def product_catalog(db: DBSession, user: CurrentUser, scope: BranchScope) -> list[ProductCatalogRow]:
     """Products with current price + stock, for the dashboard products table."""
-    return await service.list_catalog(db, user.tenant_id)
+    return await service.list_catalog(db, user.tenant_id, scope)
 
 
 @router.post(

@@ -19,6 +19,10 @@ class User(UUIDPKMixin, TimestampMixin, Base):
         index=True,
         nullable=False,
     )
+    # None = every branch (owners/admins); staff see only their own branch.
+    branch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("branches.id", ondelete="SET NULL"), index=True, nullable=True
+    )
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)

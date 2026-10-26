@@ -4,14 +4,15 @@ Design notes:
 - All figures come from real SQL aggregates -- nothing is estimated or
   inferred by a model. These functions are what an AI layer would *call*,
   never something it would answer from memory.
-- Every query is tenant-scoped, consistent with the rest of the app.
+- Every query is tenant-scoped, consistent with the rest of the app, and
+  optionally narrowed to one branch (branch_id=None means all branches).
 """
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.customer import Customer
@@ -50,7 +51,7 @@ class ProductMargin:
 
 
 async def product_margins(
-    db: AsyncSession, tenant_id: uuid.UUID, *, days: int = 30
+    db: AsyncSession, tenant_id: uuid.UUID, *, days: int = 30, branch_id: uuid.UUID | None = None
 ) -> list[ProductMargin]:
     """Revenue, cost, and profit per product over a trailing window.
 
@@ -59,7 +60,7 @@ async def product_margins(
     """
     since = datetime.now(timezone.utc) - timedelta(days=days)
 
-    rows = await db.execute(
+    q = (
         select(
             OrderItem.sku,
             OrderItem.product_name,
@@ -78,6 +79,9 @@ async def product_margins(
         .group_by(OrderItem.sku, OrderItem.product_name)
         .order_by(func.sum(OrderItem.line_total).desc())
     )
+    if branch_id is not None:
+        q = q.where(Order.branch_id == branch_id)
+    rows = await db.execute(q)
 
     out: list[ProductMargin] = []
     for r in rows:
@@ -120,6 +124,7 @@ async def drifting_customers(
     *,
     min_orders: int = 3,
     multiplier: float = 2.0,
+    branch_id: uuid.UUID | None = None,
 ) -> list[DriftingCustomer]:
     """Customers who have gone quiet relative to their OWN ordering rhythm.
 
@@ -133,7 +138,7 @@ async def drifting_customers(
     """
     now = datetime.now(timezone.utc)
 
-    rows = await db.execute(
+    q = (
         select(
             Customer.id,
             Customer.name,
@@ -150,6 +155,9 @@ async def drifting_customers(
         .group_by(Customer.id, Customer.name)
         .having(func.count(Order.id) >= min_orders)
     )
+    if branch_id is not None:
+        q = q.where(Customer.branch_id == branch_id)
+    rows = await db.execute(q)
 
     out: list[DriftingCustomer] = []
     for r in rows:
@@ -195,7 +203,9 @@ class StuckOrder:
     threshold_hours: int
 
 
-async def stuck_orders(db: AsyncSession, tenant_id: uuid.UUID) -> list[StuckOrder]:
+async def stuck_orders(
+    db: AsyncSession, tenant_id: uuid.UUID, branch_id: uuid.UUID | None = None
+) -> list[StuckOrder]:
     """Orders sitting in one status longer than that status allows.
 
     Uses the latest OrderEvent timestamp as "when it entered this status",
@@ -214,7 +224,7 @@ async def stuck_orders(db: AsyncSession, tenant_id: uuid.UUID) -> list[StuckOrde
         .subquery()
     )
 
-    rows = await db.execute(
+    q = (
         select(
             Order.id,
             Order.order_number,
@@ -229,6 +239,9 @@ async def stuck_orders(db: AsyncSession, tenant_id: uuid.UUID) -> list[StuckOrde
             Order.status.in_(tuple(STUCK_THRESHOLDS_HOURS.keys())),
         )
     )
+    if branch_id is not None:
+        q = q.where(Order.branch_id == branch_id)
+    rows = await db.execute(q)
 
     out: list[StuckOrder] = []
     for r in rows:
@@ -278,10 +291,11 @@ class MarginSummary:
 
 
 async def margin_summary(
-    db: AsyncSession, tenant_id: uuid.UUID, *, days: int = 30
+    db: AsyncSession, tenant_id: uuid.UUID, *, days: int = 30, branch_id: uuid.UUID | None = None
 ) -> MarginSummary:
     since = datetime.now(timezone.utc) - timedelta(days=days)
     has_cost = OrderItem.unit_cost.is_not(None)
+    branch_filter = (Order.branch_id == branch_id) if branch_id is not None else true()
 
     row = (
         await db.execute(
@@ -300,13 +314,14 @@ async def margin_summary(
                 OrderItem.tenant_id == tenant_id,
                 Order.status.in_(REVENUE_STATUSES),
                 Order.created_at >= since,
+                branch_filter,
             )
         )
     ).one()
 
     currency = await db.scalar(
         select(Order.currency)
-        .where(Order.tenant_id == tenant_id)
+        .where(Order.tenant_id == tenant_id, branch_filter)
         .order_by(Order.created_at.desc())
         .limit(1)
     )
@@ -353,7 +368,8 @@ class ProductCost:
     product_margins(), which reports what past orders actually earned."""
 
 
-async def product_costs(db: AsyncSession, tenant_id: uuid.UUID) -> list[ProductCost]:
+async def product_costs(db: AsyncSession, tenant_id: uuid.UUID, branch_id: uuid.UUID) -> list[ProductCost]:
+    """Costs (shared by all branches) against one branch's current sell prices."""
     rows = await db.execute(
         select(
             Product.id,
@@ -369,6 +385,7 @@ async def product_costs(db: AsyncSession, tenant_id: uuid.UUID) -> list[ProductC
             ProductPrice,
             (ProductPrice.product_id == Product.id)
             & (ProductPrice.tenant_id == tenant_id)
+            & (ProductPrice.branch_id == branch_id)
             & (ProductPrice.effective_to.is_(None)),
         )
         .where(Product.tenant_id == tenant_id)

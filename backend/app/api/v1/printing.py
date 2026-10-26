@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from sqlalchemy import select
 
+from app.core.branches import BranchScope
 from app.core.deps import CurrentUser, DBSession, require_role
 from app.core.enums import UserRole
 from app.db.models.print_job import PrintJob
@@ -18,10 +19,11 @@ router = APIRouter(prefix="/printing", tags=["printing"])
 async def list_jobs(
     db: DBSession,
     user: CurrentUser,
+    scope: BranchScope,
     job_status: str | None = Query(None, alias="status", description="queued|printing|done|failed"),
 ) -> list[PrintJobOut]:
     """List print jobs. The on-site print agent polls this with status=queued."""
-    return await service.list_jobs(db, user.tenant_id, status=job_status)
+    return await service.list_jobs(db, user.tenant_id, status=job_status, scope=scope)
 
 
 @router.post("/jobs/{job_id}/status", response_model=PrintJobOut)

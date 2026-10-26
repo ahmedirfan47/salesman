@@ -4,16 +4,20 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useMe, can } from "@/lib/use-me";
+import { useAllBranchesView, useBranches } from "@/lib/branches";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ShieldAlert, MapPin, Trash2 } from "lucide-react";
 
-type Zone = { id: string; name: string; description: string | null };
-type User = { id: string; full_name: string | null; email: string; role: string };
+type Zone = { id: string; name: string; description: string | null; branch_id: string };
+type User = { id: string; full_name: string | null; email: string; role: string; branch_id: string | null };
 
 export default function ZonesPage() {
   const { me, loading } = useMe();
+  const { current, branches, nameOf } = useBranches();
+  const allView = useAllBranchesView();
+  const [branchId, setBranchId] = useState("");
   const [zones, setZones] = useState<Zone[]>([]);
   const [drivers, setDrivers] = useState<User[]>([]);
   const [driverZones, setDriverZones] = useState<Record<string, string[]>>({});
@@ -25,7 +29,8 @@ export default function ZonesPage() {
     try {
       const [z, users] = await Promise.all([api("/zones"), api("/users")]);
       setZones(z);
-      const drv = users.filter((u: User) => u.role === "driver");
+      // drivers of the branch being viewed (or every driver when looking at all branches)
+      const drv = users.filter((u: User) => u.role === "driver" && (!current || !u.branch_id || u.branch_id === current));
       setDrivers(drv);
       const map: Record<string, string[]> = {};
       for (const d of drv) {
@@ -52,7 +57,7 @@ export default function ZonesPage() {
     if (!name.trim()) return;
     setBusy(true); setError("");
     try {
-      await api("/zones", { method: "POST", body: JSON.stringify({ name }) });
+      await api("/zones", { method: "POST", body: JSON.stringify({ name, branch_id: allView ? branchId || null : null }) });
       setName("");
       load();
     } catch (e) { setError(e instanceof Error ? e.message : "Failed"); }
@@ -78,14 +83,22 @@ export default function ZonesPage() {
 
       <Card className="mb-6 p-6">
         <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-500"><MapPin size={16} /> ADD ZONE</h2>
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
           <Input placeholder="e.g. Riyadh North" value={name} onChange={(e) => setName(e.target.value)} />
-          <Button onClick={addZone} disabled={busy || !name.trim()}>Add</Button>
+          {allView && (
+            <select value={branchId} onChange={(e) => setBranchId(e.target.value)}
+              className="rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm">
+              <option value="">Branch…</option>
+              {branches.filter((b) => b.is_active).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          )}
+          <Button onClick={addZone} disabled={busy || !name.trim() || (allView && !branchId)}>Add</Button>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
           {zones.map((z) => (
             <span key={z.id} className="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1 text-sm text-indigo-700">
               {z.name}
+              {!current && branches.length > 1 && <span className="text-xs text-indigo-400">· {nameOf(z.branch_id)}</span>}
               <button onClick={() => removeZone(z.id)} className="text-indigo-400 hover:text-red-600"><Trash2 size={13} /></button>
             </span>
           ))}
@@ -102,7 +115,7 @@ export default function ZonesPage() {
             <Card key={d.id} className="p-5">
               <div className="mb-3 font-medium">{d.full_name || d.email}</div>
               <div className="flex flex-wrap gap-2">
-                {zones.map((z) => {
+                {zones.filter((z) => !d.branch_id || z.branch_id === d.branch_id).map((z) => {
                   const on = (driverZones[d.id] || []).includes(z.id);
                   return (
                     <button key={z.id} onClick={() => toggleDriverZone(d.id, z.id)}

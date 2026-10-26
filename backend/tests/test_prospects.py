@@ -13,6 +13,7 @@ from openpyxl import Workbook
 from sqlalchemy import func, select
 
 from app.config import settings
+from app.core.branches import default_branch
 from app.core.security import create_access_token, hash_password
 from app.db.models.customer import Customer
 from app.db.models.inventory import Inventory
@@ -47,6 +48,7 @@ async def _tenant(db):
     t = Tenant(name="Al Rayyan Fresh", slug=f"t-{uuid.uuid4().hex[:10]}")
     db.add(t)
     await db.flush()
+    t.branch = await default_branch(db, t.id)  # plain attribute, for building test rows
     return t
 
 
@@ -71,7 +73,7 @@ async def _setup(db, role="salesman"):
 
 async def _catalog(db, t):
     """Active price list: tomatoes and cucumbers in stock, mangoes out of stock."""
-    pl = PriceList(tenant_id=t.id, version=1, status="active")
+    pl = PriceList(tenant_id=t.id, branch_id=t.branch.id, version=1, status="active")
     db.add(pl)
     await db.flush()
     now = datetime.now(timezone.utc)
@@ -82,9 +84,9 @@ async def _catalog(db, t):
         p = Product(tenant_id=t.id, sku=sku, name_en=en, name_ar=ar)
         db.add(p)
         await db.flush()
-        db.add(ProductPrice(tenant_id=t.id, product_id=p.id, price_list_id=pl.id, unit_price=Decimal(price),
-                            currency="SAR", effective_from=now, effective_to=None))
-        db.add(Inventory(tenant_id=t.id, product_id=p.id, quantity_on_hand=stock))
+        db.add(ProductPrice(tenant_id=t.id, branch_id=t.branch.id, product_id=p.id, price_list_id=pl.id,
+                            unit_price=Decimal(price), currency="SAR", effective_from=now, effective_to=None))
+        db.add(Inventory(tenant_id=t.id, branch_id=t.branch.id, product_id=p.id, quantity_on_hand=stock))
         out[sku] = p
     await db.commit()
     return out
@@ -168,7 +170,7 @@ async def test_create_prospect_normalises_phone_and_assigns_creator(db, client):
 
 async def test_an_existing_customer_is_not_a_new_prospect(db, client):
     t, u = await _setup(db)
-    db.add(Customer(tenant_id=t.id, name="Bait Al Khair", whatsapp_number="966501112222"))
+    db.add(Customer(tenant_id=t.id, branch_id=t.branch.id, name="Bait Al Khair", whatsapp_number="966501112222"))
     await db.commit()
     r = await client.post("/api/v1/prospects", headers=_auth(u), json={"name": "BAK", "phone": "0501112222"})
     assert r.status_code == 409 and "already a customer" in r.json()["detail"]
@@ -188,9 +190,9 @@ async def test_roles(db, client):
 
 async def test_import_endpoint_skips_known_shops_and_matches_zones(db, client):
     t, u = await _setup(db)
-    zone = Zone(tenant_id=t.id, name="Riyadh North")
+    zone = Zone(tenant_id=t.id, branch_id=t.branch.id, name="Riyadh North")
     db.add(zone)
-    db.add(Customer(tenant_id=t.id, name="Existing", whatsapp_number="+966500000001"))
+    db.add(Customer(tenant_id=t.id, branch_id=t.branch.id, name="Existing", whatsapp_number="+966500000001"))
     await db.commit()
     await client.post("/api/v1/prospects", headers=_auth(u), json={"name": "Known", "phone": "0500000002"})
 
@@ -300,7 +302,7 @@ async def test_contacted_logs_message_and_advances_status(db, client):
 
 async def test_convert_creates_customer_once(db, client):
     t, u = await _setup(db)
-    zone = Zone(tenant_id=t.id, name="Riyadh East")
+    zone = Zone(tenant_id=t.id, branch_id=t.branch.id, name="Riyadh East")
     db.add(zone)
     await db.commit()
     p = (await client.post("/api/v1/prospects", headers=_auth(u),
@@ -320,12 +322,12 @@ async def test_convert_creates_customer_once(db, client):
 async def test_winback_refresh_is_idempotent_and_closes_when_they_order(db, client, monkeypatch):
     t, u = await _setup(db)
     products = await _catalog(db, t)
-    c = Customer(tenant_id=t.id, name="Al Waha Market", whatsapp_number="+966507778888")
+    c = Customer(tenant_id=t.id, branch_id=t.branch.id, name="Al Waha Market", whatsapp_number="+966507778888")
     db.add(c)
     await db.flush()
     now = datetime.now(timezone.utc)
     for i, days_ago in enumerate((45, 40, 35, 30)):
-        db.add(Order(tenant_id=t.id, order_number=f"ORD-{i}", customer_id=c.id, status="completed",
+        db.add(Order(tenant_id=t.id, branch_id=t.branch.id, order_number=f"ORD-{i}", customer_id=c.id, status="completed",
                      currency="SAR", total_amount=Decimal("100"), created_at=now - timedelta(days=days_ago)))
     await db.commit()
 
@@ -341,7 +343,7 @@ async def test_winback_refresh_is_idempotent_and_closes_when_they_order(db, clie
     draft = (await client.post(f"/api/v1/prospects/{rows[0]['id']}/draft", headers=_auth(u), json={})).json()
     assert "haven't had an order" in draft["message"]
 
-    db.add(Order(tenant_id=t.id, order_number="ORD-NEW", customer_id=c.id, status="confirmed",
+    db.add(Order(tenant_id=t.id, branch_id=t.branch.id, order_number="ORD-NEW", customer_id=c.id, status="confirmed",
                  currency="SAR", total_amount=Decimal("50"), created_at=datetime.now(timezone.utc)))
     await db.commit()
     rows = (await client.get("/api/v1/prospects?kind=winback", headers=_auth(u))).json()
@@ -372,7 +374,7 @@ async def test_google_search_off_without_key(db, client, monkeypatch):
 
 async def test_google_search_marks_known_shops_and_add(db, client, monkeypatch):
     t, u = await _setup(db)
-    db.add(Customer(tenant_id=t.id, name="Customer Shop", whatsapp_number="+966501110000"))
+    db.add(Customer(tenant_id=t.id, branch_id=t.branch.id, name="Customer Shop", whatsapp_number="+966501110000"))
     await db.commit()
     seen = {}
 

@@ -9,7 +9,7 @@ from app.db.models.mixins import TimestampMixin, UUIDPKMixin
 
 
 class Inventory(UUIDPKMixin, TimestampMixin, Base):
-    """Cached current stock level per product (one row per product).
+    """Cached current stock level per product per branch (one row each).
 
     This is the fast 'how many do we have right now' value. It is always
     updated inside the same DB transaction as an InventoryTransaction, so
@@ -18,11 +18,14 @@ class Inventory(UUIDPKMixin, TimestampMixin, Base):
 
     __tablename__ = "inventory"
     __table_args__ = (
-        UniqueConstraint("tenant_id", "product_id", name="uq_inventory_tenant_product"),
+        UniqueConstraint("tenant_id", "branch_id", "product_id", name="uq_inventory_branch_product"),
     )
 
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    branch_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("branches.id"), index=True, nullable=False
     )
     product_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("products.id", ondelete="CASCADE"), index=True, nullable=False

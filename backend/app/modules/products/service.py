@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.inventory import Inventory
@@ -65,39 +65,47 @@ async def delete_product(db: AsyncSession, tenant_id: uuid.UUID, product_id: uui
     await db.commit()
 
 
-async def list_catalog(db: AsyncSession, tenant_id: uuid.UUID) -> list[dict]:
-    """Products enriched with current price + stock (for the dashboard table)."""
-    rows = await db.execute(
-        select(
-            Product.id,
-            Product.sku,
-            Product.name_en,
-            Product.name_ar,
-            Product.category,
-            Product.is_active,
-            ProductPrice.unit_price,
-            ProductPrice.currency,
-            Inventory.quantity_on_hand,
-        )
-        .outerjoin(
-            ProductPrice,
-            (ProductPrice.product_id == Product.id) & (ProductPrice.effective_to.is_(None)),
-        )
-        .outerjoin(Inventory, Inventory.product_id == Product.id)
-        .where(Product.tenant_id == tenant_id)
-        .order_by(Product.sku)
+async def list_catalog(db: AsyncSession, tenant_id: uuid.UUID, scope: uuid.UUID | None = None) -> list[dict]:
+    """Products with current price + stock (for the dashboard table).
+
+    For one branch: that branch's price and stock. For all branches: stock is
+    the total across branches, and when branch prices differ the row carries
+    the lowest and highest price instead of a single one.
+    """
+    products = list(await db.scalars(
+        select(Product).where(Product.tenant_id == tenant_id).order_by(Product.sku)
+    ))
+    price_q = select(ProductPrice.product_id, ProductPrice.unit_price, ProductPrice.currency).where(
+        ProductPrice.tenant_id == tenant_id, ProductPrice.effective_to.is_(None)
     )
+    stock_q = select(Inventory.product_id, func.sum(Inventory.quantity_on_hand)).where(
+        Inventory.tenant_id == tenant_id
+    ).group_by(Inventory.product_id)
+    if scope is not None:
+        price_q = price_q.where(ProductPrice.branch_id == scope)
+        stock_q = stock_q.where(Inventory.branch_id == scope)
+
+    prices: dict = {}
+    for pid, price, currency in await db.execute(price_q):
+        prices.setdefault(pid, []).append((float(price), currency))
+    stock = {pid: int(qty or 0) for pid, qty in await db.execute(stock_q)}
+
     out = []
-    for r in rows:
+    for p in products:
+        rows = prices.get(p.id, [])
+        values = [v for v, _ in rows]
+        low, high = (min(values), max(values)) if values else (None, None)
         out.append({
-            "id": r.id,
-            "sku": r.sku,
-            "name_en": r.name_en,
-            "name_ar": r.name_ar,
-            "category": r.category,
-            "is_active": r.is_active,
-            "unit_price": float(r.unit_price) if r.unit_price is not None else None,
-            "currency": r.currency,
-            "stock": r.quantity_on_hand if r.quantity_on_hand is not None else 0,
+            "id": p.id,
+            "sku": p.sku,
+            "name_en": p.name_en,
+            "name_ar": p.name_ar,
+            "category": p.category,
+            "is_active": p.is_active,
+            "unit_price": low if low == high else None,
+            "price_min": low,
+            "price_max": high,
+            "currency": rows[0][1] if rows else None,
+            "stock": stock.get(p.id, 0),
         })
     return out

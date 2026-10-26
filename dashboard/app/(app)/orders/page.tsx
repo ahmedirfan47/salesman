@@ -9,9 +9,11 @@ import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import { OrderProgress } from "@/components/order-progress";
 import { TableScroll } from "@/components/table-scroll";
+import { useBranches } from "@/lib/branches";
 
 type Order = {
   id: string;
+  branch_id: string;
   order_number: string;
   status: string;
   customer_name: string | null;
@@ -22,6 +24,8 @@ type Order = {
 
 export default function OrdersPage() {
   const router = useRouter();
+  const { current, branches, nameOf } = useBranches();
+  const showBranch = !current && branches.length > 1;
   const [orders, setOrders] = useState<Order[]>([]);
   const [error, setError] = useState("");
 
@@ -53,6 +57,7 @@ export default function OrdersPage() {
               <tr>
                 <th className="px-4 py-3 font-medium">Order</th>
                 <th className="px-4 py-3 font-medium">Customer</th>
+                {showBranch && <th className="px-4 py-3 font-medium">Branch</th>}
                 <th className="px-4 py-3 font-medium">Total</th>
                 <th className="px-4 py-3 font-medium">Progress</th>
               </tr>
@@ -66,12 +71,13 @@ export default function OrdersPage() {
                 >
                   <td className="px-4 py-3 font-mono text-xs">{o.order_number}</td>
                   <td className="px-4 py-3">{o.customer_name ?? "—"}</td>
+                  {showBranch && <td className="px-4 py-3 text-slate-600">{nameOf(o.branch_id)}</td>}
                   <td className="px-4 py-3">{o.currency} {Number(o.total_amount).toLocaleString()}</td>
                   <td className="px-4 py-3"><OrderProgress status={o.status} compact /></td>
                 </tr>
               ))}
               {orders.length === 0 && !error && (
-                <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-400">No orders yet</td></tr>
+                <tr><td colSpan={showBranch ? 5 : 4} className="px-4 py-8 text-center text-slate-400">No orders yet</td></tr>
               )}
             </tbody>
           </table>

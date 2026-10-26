@@ -2,6 +2,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.core.branches import BranchScope
 from app.core.deps import CurrentUser, DBSession, require_capability
 from app.core.permissions import Capability, has_capability
 from app.modules.orders import service
@@ -19,23 +20,23 @@ router = APIRouter(prefix="/orders", tags=["orders"])
 
 
 @router.get("", response_model=list[OrderOut])
-async def list_orders(db: DBSession, user: CurrentUser) -> list[OrderOut]:
-    return await service.list_orders(db, user.tenant_id)
+async def list_orders(db: DBSession, user: CurrentUser, scope: BranchScope) -> list[OrderOut]:
+    return await service.list_orders(db, user.tenant_id, scope)
 
 
 @router.post(
     "", response_model=OrderOut, status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_capability(Capability.CREATE_ORDER))],
 )
-async def create_order(data: OrderCreate, db: DBSession, user: CurrentUser) -> OrderOut:
+async def create_order(data: OrderCreate, db: DBSession, user: CurrentUser, scope: BranchScope) -> OrderOut:
     """Create an order (cart). Confirms if all items are in stock, otherwise
     holds for human review and opens an escalation."""
-    return await service.create_order(db, user.tenant_id, data, actor_id=user.id)
+    return await service.create_order(db, user.tenant_id, data, actor_id=user.id, scope=scope)
 
 
 @router.get("/{order_id}", response_model=OrderDetailOut)
-async def get_order(order_id: uuid.UUID, db: DBSession, user: CurrentUser) -> OrderDetailOut:
-    order = await service.get_order(db, user.tenant_id, order_id)
+async def get_order(order_id: uuid.UUID, db: DBSession, user: CurrentUser, scope: BranchScope) -> OrderDetailOut:
+    order = await service.get_order(db, user.tenant_id, order_id, scope)
     events = await service.list_order_events(db, user.tenant_id, order_id)
     data = OrderDetailOut.model_validate(order)
     data.events = [OrderEventOut.model_validate(e) for e in events]
@@ -53,7 +54,7 @@ _TRANSITION_CAPABILITY = {
 
 @router.post("/{order_id}/transition", response_model=OrderOut)
 async def transition_order(
-    order_id: uuid.UUID, data: OrderTransition, db: DBSession, user: CurrentUser
+    order_id: uuid.UUID, data: OrderTransition, db: DBSession, user: CurrentUser, scope: BranchScope
 ) -> OrderOut:
     """Advance an order through its lifecycle: confirmed -> preparing ->
     dispatched -> delivered -> completed (or cancel). Gated by capability per
@@ -67,14 +68,14 @@ async def transition_order(
     actor_name = getattr(user, "full_name", None) or getattr(user, "email", None)
     return await service.transition_order(
         db, user.tenant_id, order_id, data.to_status,
-        actor_id=user.id, actor_name=actor_name, note=data.note,
+        actor_id=user.id, actor_name=actor_name, note=data.note, scope=scope,
     )
 
 
 # --- escalations (human review queue) ---
 @router.get("/escalations/open", response_model=list[EscalationOut])
-async def open_escalations(db: DBSession, user: CurrentUser) -> list[EscalationOut]:
-    return await service.list_escalations(db, user.tenant_id, open_only=True)
+async def open_escalations(db: DBSession, user: CurrentUser, scope: BranchScope) -> list[EscalationOut]:
+    return await service.list_escalations(db, user.tenant_id, open_only=True, scope=scope)
 
 
 @router.post(
@@ -87,8 +88,10 @@ async def resolve_escalation(
     data: ResolveEscalation,
     db: DBSession,
     user: CurrentUser,
+    scope: BranchScope,
 ) -> EscalationOut:
     """Admin approves (fulfil what stock allows) or rejects (cancel) a held order."""
     return await service.resolve_escalation(
-        db, user.tenant_id, escalation_id, approve=data.approve, note=data.note, actor_id=user.id
+        db, user.tenant_id, escalation_id, approve=data.approve, note=data.note, actor_id=user.id,
+        scope=scope,
     )

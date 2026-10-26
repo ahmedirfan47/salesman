@@ -6,10 +6,11 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, Package, Tag, ShoppingCart, AlertTriangle,
   FileBarChart, Printer, MessageSquare, Users, MapPin, ClipboardList,
-  Truck, Contact, CreditCard, LogOut, Menu, X, TrendingUp, Target,
+  Truck, Contact, CreditCard, LogOut, Menu, X, TrendingUp, Target, Building2,
 } from "lucide-react";
 import { clearToken } from "@/lib/api";
 import { useMe, can } from "@/lib/use-me";
+import { BranchSwitcher } from "@/components/branch-switcher";
 
 const nav = [
   { href: "/overview", label: "Overview", icon: LayoutDashboard, cap: null },
@@ -26,6 +27,7 @@ const nav = [
   { href: "/analytics", label: "Analytics", icon: TrendingUp, cap: "view_analytics" },
   { href: "/printing", label: "Print Queue", icon: Printer, cap: "view_printing" },
   { href: "/zones", label: "Zones", icon: MapPin, cap: "manage_users" },
+  { href: "/branches", label: "Branches", icon: Building2, cap: "manage_users" },
   { href: "/billing", label: "Billing & Plan", icon: CreditCard, cap: "manage_users" },
   { href: "/admin", label: "Team & Access", icon: Users, cap: "manage_users" },
 ];
@@ -99,6 +101,7 @@ export default function Sidebar() {
       <aside className="hidden w-60 shrink-0 flex-col border-r border-[var(--border)] bg-white md:flex">
         <div className="px-6 py-5">{brand}</div>
         {userLine}
+        <BranchSwitcher />
         <NavList />
         <button
           onClick={logout}
@@ -124,6 +127,7 @@ export default function Sidebar() {
               </button>
             </div>
             {userLine}
+            <BranchSwitcher onChange={() => setOpen(false)} />
             <NavList onNavigate={() => setOpen(false)} />
             <button
               onClick={() => { setOpen(false); logout(); }}

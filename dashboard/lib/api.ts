@@ -10,6 +10,25 @@ export function setToken(t: string) {
 }
 export function clearToken() {
   localStorage.removeItem("salesman_token");
+  localStorage.removeItem(BRANCH_KEY);
+}
+
+// The branch an owner/admin is looking at ("" = all branches). Sent on every
+// request; the server ignores it for branch staff, who only see their branch.
+const BRANCH_KEY = "salesman_branch";
+export function getBranchId(): string {
+  if (typeof window === "undefined") return "";
+  try { return localStorage.getItem(BRANCH_KEY) || ""; } catch { return ""; }
+}
+export function setBranchId(id: string) {
+  try {
+    if (id) localStorage.setItem(BRANCH_KEY, id);
+    else localStorage.removeItem(BRANCH_KEY);
+  } catch { /* storage unavailable: the choice lasts for this page only */ }
+}
+function branchHeader(): Record<string, string> {
+  const id = getBranchId();
+  return id ? { "X-Branch-Id": id } : {};
 }
 
 export async function api(path: string, options: RequestInit = {}) {
@@ -19,6 +38,7 @@ export async function api(path: string, options: RequestInit = {}) {
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...branchHeader(),
       ...(options.headers || {}),
     },
   });
@@ -55,7 +75,7 @@ export async function uploadFile(path: string, file: File) {
   form.append("file", file);
   const res = await fetch(`${API_BASE}/api/v1${path}`, {
     method: "POST",
-    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) }, // no Content-Type: browser sets multipart boundary
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...branchHeader() }, // no Content-Type: browser sets multipart boundary
     body: form,
   });
   if (res.status === 401) {
@@ -76,6 +96,9 @@ export type Me = {
   role: string;
   is_active: boolean;
   capabilities: string[];
+  branch_id: string | null;
+  branch_name: string | null;
+  sees_all_branches: boolean;
 };
 
 export async function fetchMe(): Promise<Me> {

@@ -9,11 +9,12 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft, Truck, PackageCheck, CheckCircle2, XCircle, Package } from "lucide-react";
 import { OrderProgress } from "@/components/order-progress";
 import { TableScroll } from "@/components/table-scroll";
+import { useBranches } from "@/lib/branches";
 
 type Item = { id: string; sku: string; product_name: string; quantity: number; unit_price: string; line_total: string };
 type Event = { from_status: string | null; to_status: string; actor_name: string | null; note: string | null; created_at: string };
 type Order = {
-  id: string; order_number: string; status: string;
+  id: string; branch_id: string; order_number: string; status: string;
   customer_name: string | null; total_amount: string; currency: string;
   created_at: string; items: Item[]; events: Event[];
 };
@@ -49,6 +50,7 @@ const nextActions: Record<string, { to: string; label: string; icon: typeof Truc
 
 export default function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const { branches, nameOf } = useBranches();
   const [order, setOrder] = useState<Order | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -96,7 +98,10 @@ export default function OrderDetailPage() {
       <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">{order.order_number}</h1>
-          <p className="text-sm text-slate-500">{order.customer_name ?? "—"}</p>
+          <p className="text-sm text-slate-500">
+            {order.customer_name ?? "—"}
+            {branches.length > 1 && nameOf(order.branch_id) && <> · {nameOf(order.branch_id)} branch</>}
+          </p>
         </div>
         <span className={`w-fit rounded-full px-3 py-1 text-sm font-medium ${statusColor[order.status] ?? "bg-gray-100"}`}>
           {order.status.replace(/_/g, " ")}

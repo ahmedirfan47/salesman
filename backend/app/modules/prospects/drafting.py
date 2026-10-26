@@ -18,6 +18,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.llm import chat
+from app.core.branches import default_branch
 from app.db.models.inventory import Inventory
 from app.db.models.order import Order
 from app.db.models.order_item import OrderItem
@@ -34,7 +35,7 @@ _LLM_TIMEOUT_SECONDS = 20
 _CCY_AR = {"SAR": "ر.س", "AED": "د.إ", "PKR": "روبية", "USD": "دولار"}
 _DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹٫٬", "01234567890123456789.,")
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
-_ARABIC = re.compile(r"[\u0600-\u06FF]")
+_ARABIC = re.compile(r"[؀-ۿ]")
 
 
 @dataclass
@@ -100,11 +101,16 @@ def _numbers(text: str) -> set[str]:
 
 # --- facts from the database ------------------------------------------------
 
-async def _priced_in_stock(db: AsyncSession, tenant_id) -> dict:
+async def _priced_in_stock(db: AsyncSession, tenant_id, branch_id) -> dict:
     rows = await db.execute(
         select(Product, ProductPrice.unit_price, ProductPrice.currency, Inventory.quantity_on_hand)
-        .join(ProductPrice, (ProductPrice.product_id == Product.id) & ProductPrice.effective_to.is_(None))
-        .outerjoin(Inventory, Inventory.product_id == Product.id)
+        .join(
+            ProductPrice,
+            (ProductPrice.product_id == Product.id)
+            & (ProductPrice.branch_id == branch_id)
+            & ProductPrice.effective_to.is_(None),
+        )
+        .outerjoin(Inventory, (Inventory.product_id == Product.id) & (Inventory.branch_id == branch_id))
         .where(Product.tenant_id == tenant_id, Product.is_active.is_(True))
     )
     out = {}
@@ -114,7 +120,8 @@ async def _priced_in_stock(db: AsyncSession, tenant_id) -> dict:
     return out
 
 
-async def _sold_quantities(db: AsyncSession, tenant_id, *, customer_id=None, days: int | None = None) -> list:
+async def _sold_quantities(db: AsyncSession, tenant_id, *, customer_id=None, days: int | None = None,
+                           branch_id=None) -> list:
     q = (
         select(OrderItem.product_id, func.sum(OrderItem.quantity).label("qty"))
         .join(Order, Order.id == OrderItem.order_id)
@@ -124,13 +131,17 @@ async def _sold_quantities(db: AsyncSession, tenant_id, *, customer_id=None, day
     )
     if customer_id is not None:
         q = q.where(Order.customer_id == customer_id)
+    if branch_id is not None:
+        q = q.where(Order.branch_id == branch_id)
     if days is not None:
         q = q.where(Order.created_at >= datetime.now(timezone.utc) - timedelta(days=days))
     return [r.product_id for r in await db.execute(q)]
 
 
 async def build_facts(db: AsyncSession, prospect: Prospect, *, business: str, rep: str | None, language: str) -> Facts:
-    priced = await _priced_in_stock(db, prospect.tenant_id)
+    # prices and stock of the prospect's branch (the default branch if it has none yet)
+    branch_id = prospect.branch_id or (await default_branch(db, prospect.tenant_id)).id
+    priced = await _priced_in_stock(db, prospect.tenant_id, branch_id)
     chosen: list[PricedProduct] = []
 
     if prospect.kind == "winback" and prospect.customer_id:
@@ -140,7 +151,7 @@ async def build_facts(db: AsyncSession, prospect: Prospect, *, business: str, re
             if len(chosen) == _MAX_PRODUCTS:
                 break
     if not chosen:
-        ranked = await _sold_quantities(db, prospect.tenant_id, days=60)
+        ranked = await _sold_quantities(db, prospect.tenant_id, days=60, branch_id=branch_id)
         for pid in ranked + [pid for pid in priced if pid not in ranked]:
             if pid in priced:
                 chosen.append(priced[pid])

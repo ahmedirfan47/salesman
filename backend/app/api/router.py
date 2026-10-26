@@ -1,13 +1,14 @@
 from fastapi import APIRouter
 
 from app.api.v1 import (
-    agent, analytics, auth, conversations, customers, health, orders, pricing, printing, products, prospects,
+    agent, analytics, auth, branches, conversations, customers, health, orders, pricing, printing, products, prospects,
     reports, users, whatsapp, zones,
 )
 
 api_router = APIRouter()
 api_router.include_router(health.router)
 api_router.include_router(auth.router)
+api_router.include_router(branches.router)
 api_router.include_router(products.router)
 api_router.include_router(users.router)
 api_router.include_router(customers.router)

@@ -22,6 +22,9 @@ class Escalation(UUIDPKMixin, TimestampMixin, Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True, nullable=False
     )
+    branch_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("branches.id"), index=True, nullable=False
+    )
     # e.g. insufficient_stock | special_price | dispute | unverifiable | payment | delivery
     reason_type: Mapped[str] = mapped_column(String(40), nullable=False)
     context: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)

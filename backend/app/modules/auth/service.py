@@ -5,6 +5,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.branches import default_branch
 from app.core.enums import UserRole
 from app.core.security import hash_password, verify_password
 from app.db.models.tenant import Tenant
@@ -31,6 +32,7 @@ async def register_tenant(db: AsyncSession, data: RegisterRequest) -> tuple[Tena
     tenant = Tenant(name=data.tenant_name, slug=slug)
     db.add(tenant)
     await db.flush()  # populate tenant.id before creating the user
+    await default_branch(db, tenant.id)  # every business starts with one branch
 
     user = User(
         tenant_id=tenant.id,

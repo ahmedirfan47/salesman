@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useMe, can } from "@/lib/use-me";
+import { useBranches } from "@/lib/branches";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,10 +12,12 @@ import { TableScroll } from "@/components/table-scroll";
 
 type User = {
   id: string; email: string; full_name: string | null;
-  role: string; is_active: boolean;
+  role: string; is_active: boolean; branch_id: string | null;
 };
 
 const ROLES = ["admin", "salesman", "dispatcher", "driver", "warehouse", "viewer"];
+// these roles work across every branch; everyone else belongs to one
+const ALL_BRANCH_ROLES = ["owner", "admin", "demo"];
 
 const roleColor: Record<string, string> = {
   owner: "bg-purple-50 text-purple-700",
@@ -24,14 +27,18 @@ const roleColor: Record<string, string> = {
   driver: "bg-amber-50 text-amber-700",
   warehouse: "bg-cyan-50 text-cyan-700",
   viewer: "bg-gray-100 text-gray-600",
+  demo: "bg-pink-50 text-pink-700",
 };
 
 export default function AdminPage() {
   const { me, loading } = useMe();
+  const { branches, current } = useBranches();
+  const activeBranches = branches.filter((b) => b.is_active);
+  const multiBranch = branches.length > 1;
   const [users, setUsers] = useState<User[]>([]);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
-  const [form, setForm] = useState({ full_name: "", email: "", password: "", role: "salesman" });
+  const [form, setForm] = useState({ full_name: "", email: "", password: "", role: "salesman", branch_id: current });
   const [busy, setBusy] = useState(false);
 
   function load() {
@@ -56,9 +63,9 @@ export default function AdminPage() {
   async function createUser() {
     setError(""); setMsg(""); setBusy(true);
     try {
-      await api("/users", { method: "POST", body: JSON.stringify(form) });
+      await api("/users", { method: "POST", body: JSON.stringify({ ...form, branch_id: form.branch_id || null }) });
       setMsg(`Created ${form.email} as ${form.role}.`);
-      setForm({ full_name: "", email: "", password: "", role: "salesman" });
+      setForm({ full_name: "", email: "", password: "", role: "salesman", branch_id: current });
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
@@ -69,6 +76,10 @@ export default function AdminPage() {
 
   async function changeRole(id: string, role: string) {
     try { await api(`/users/${id}`, { method: "PATCH", body: JSON.stringify({ role }) }); load(); }
+    catch (e) { setError(e instanceof Error ? e.message : "Failed"); }
+  }
+  async function changeBranch(id: string, branch_id: string) {
+    try { await api(`/users/${id}`, { method: "PATCH", body: JSON.stringify({ branch_id: branch_id || null }) }); load(); }
     catch (e) { setError(e instanceof Error ? e.message : "Failed"); }
   }
   async function toggleActive(id: string, is_active: boolean) {
@@ -88,7 +99,7 @@ export default function AdminPage() {
         <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-500">
           <UserPlus size={16} /> ADD TEAM MEMBER
         </h2>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className={`grid grid-cols-1 gap-3 sm:grid-cols-2 ${multiBranch ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
           <Input placeholder="Full name" value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
           <Input type="email" placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
           <Input type="password" placeholder="Password (8+ chars)" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
@@ -96,6 +107,15 @@ export default function AdminPage() {
             className="rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm outline-none focus:border-[var(--primary)]">
             {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
+          {multiBranch && (
+            <select value={ALL_BRANCH_ROLES.includes(form.role) ? "" : form.branch_id}
+              disabled={ALL_BRANCH_ROLES.includes(form.role)}
+              onChange={(e) => setForm({ ...form, branch_id: e.target.value })}
+              className="rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm outline-none focus:border-[var(--primary)] disabled:text-slate-400">
+              <option value="">{ALL_BRANCH_ROLES.includes(form.role) ? "All branches" : "Default branch"}</option>
+              {activeBranches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          )}
         </div>
         <div className="mt-4 flex justify-end">
           <Button onClick={createUser} disabled={busy || !form.email || !form.password}>
@@ -112,6 +132,7 @@ export default function AdminPage() {
                 <th className="px-4 py-3 font-medium">Name</th>
                 <th className="px-4 py-3 font-medium">Email</th>
                 <th className="px-4 py-3 font-medium">Role</th>
+                {multiBranch && <th className="px-4 py-3 font-medium">Branch</th>}
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium"></th>
               </tr>
@@ -119,14 +140,15 @@ export default function AdminPage() {
             <tbody>
               {users.map((u) => {
                 const isOwner = u.role === "owner";
+                const fixedRole = isOwner || u.role === "demo"; // set outside this screen
                 const isSelf = u.id === me?.id;
                 return (
                   <tr key={u.id} className="border-b border-[var(--border)] last:border-0">
                     <td className="px-4 py-3">{u.full_name ?? "—"}{isSelf && <span className="ml-2 text-xs text-slate-400">(you)</span>}</td>
                     <td className="px-4 py-3 text-slate-600">{u.email}</td>
                     <td className="px-4 py-3">
-                      {isOwner ? (
-                        <span className={`rounded-full px-2 py-0.5 text-xs ${roleColor.owner}`}>owner</span>
+                      {fixedRole ? (
+                        <span className={`rounded-full px-2 py-0.5 text-xs ${roleColor[u.role]}`}>{u.role}</span>
                       ) : (
                         <select value={u.role} onChange={(e) => changeRole(u.id, e.target.value)}
                           className={`rounded-full px-2 py-1 text-xs ${roleColor[u.role] ?? "bg-gray-100"}`}>
@@ -134,6 +156,19 @@ export default function AdminPage() {
                         </select>
                       )}
                     </td>
+                    {multiBranch && (
+                      <td className="px-4 py-3">
+                        {ALL_BRANCH_ROLES.includes(u.role) ? (
+                          <span className="text-xs text-slate-500">All branches</span>
+                        ) : (
+                          <select value={u.branch_id ?? ""} onChange={(e) => changeBranch(u.id, e.target.value)}
+                            className="rounded-lg border border-[var(--border)] bg-white px-2 py-1 text-xs">
+                            {!u.branch_id && <option value="">Not set</option>}
+                            {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                          </select>
+                        )}
+                      </td>
+                    )}
                     <td className="px-4 py-3">
                       <span className={`rounded-full px-2 py-0.5 text-xs ${u.is_active ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
                         {u.is_active ? "Active" : "Disabled"}

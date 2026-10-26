@@ -17,6 +17,9 @@ class Conversation(UUIDPKMixin, TimestampMixin, Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True, nullable=False
     )
+    branch_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("branches.id"), index=True, nullable=False
+    )
     customer_number: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
     customer_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     language: Mapped[str | None] = mapped_column(String(8), nullable=True)

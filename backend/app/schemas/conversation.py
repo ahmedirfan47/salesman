@@ -8,6 +8,7 @@ class ConversationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    branch_id: uuid.UUID
     customer_number: str
     customer_name: str | None
     status: str

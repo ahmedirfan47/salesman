@@ -6,6 +6,8 @@
 The demo user has the 'demo' role: it can open every screen (orders,
 analytics, conversations, zones, team...) but the API rejects every change.
 All data lives in its own tenant, so it never touches a real customer's data.
+The demo business has two branches, Riyadh and Jeddah, each with its own
+prices, stock, zones, drivers and customers.
 --reset deletes that demo tenant and rebuilds it with fresh dates.
 """
 import argparse
@@ -20,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import UserRole
 from app.core.security import hash_password
+from app.db.models.branch import Branch
 from app.db.models.conversation import Conversation
 from app.db.models.customer import Customer
 from app.db.models.escalation import Escalation
@@ -103,23 +106,31 @@ async def seed(db: AsyncSession, email: str, password: str, *, reset: bool = Fal
     await db.flush()
     tid = tenant.id
 
+    riyadh = Branch(tenant_id=tid, name="Riyadh", city="Riyadh", address="Al Aziziyah wholesale market",
+                    is_default=True, is_active=True, order_updates_enabled=True)
+    jeddah = Branch(tenant_id=tid, name="Jeddah", city="Jeddah", address="Al Haramain Rd, central market",
+                    is_default=False, is_active=True, order_updates_enabled=True)
+    db.add_all([riyadh, jeddah])
+    await db.flush()
+    rid = riyadh.id
+
     demo_user = User(tenant_id=tid, email=email, password_hash=hash_password(password),
                      full_name="Demo viewer", role=UserRole.DEMO.value)
     db.add(demo_user)
-    rep = User(tenant_id=tid, email=f"nasser.demo.{uuid.uuid4().hex[:6]}@example.com",
+    rep = User(tenant_id=tid, branch_id=rid, email=f"nasser.demo.{uuid.uuid4().hex[:6]}@example.com",
                password_hash=hash_password(uuid.uuid4().hex), full_name="Nasser", role=UserRole.SALESMAN.value)
     db.add(rep)
 
     zones = {}
     for name in ZONES:
-        z = Zone(tenant_id=tid, name=name, description=f"{name} delivery area")
+        z = Zone(tenant_id=tid, branch_id=rid, name=name, description=f"{name} delivery area")
         db.add(z)
         zones[name] = z
     await db.flush()
 
     drivers = {}
     for name, zone_name in DRIVERS:
-        d = User(tenant_id=tid, email=f"{name.lower()}.demo.{uuid.uuid4().hex[:6]}@example.com",
+        d = User(tenant_id=tid, branch_id=rid, email=f"{name.lower()}.demo.{uuid.uuid4().hex[:6]}@example.com",
                  password_hash=hash_password(uuid.uuid4().hex), full_name=name, role=UserRole.DRIVER.value)
         db.add(d)
         await db.flush()
@@ -127,10 +138,11 @@ async def seed(db: AsyncSession, email: str, password: str, *, reset: bool = Fal
         drivers[zone_name] = d
 
     # two price-list versions: the active one and the one it replaced
-    old_list = PriceList(tenant_id=tid, version=13, status="superseded", source_filename="prices-v13.xlsx",
+    old_list = PriceList(tenant_id=tid, branch_id=rid, version=13, status="superseded",
+                         source_filename="riyadh-prices-v13.xlsx",
                          activated_at=now - timedelta(days=9), superseded_at=now - timedelta(days=1))
-    new_list = PriceList(tenant_id=tid, version=14, status="active", source_filename="prices-v14.xlsx",
-                         activated_at=now - timedelta(days=1))
+    new_list = PriceList(tenant_id=tid, branch_id=rid, version=14, status="active",
+                         source_filename="riyadh-prices-v14.xlsx", activated_at=now - timedelta(days=1))
     db.add_all([old_list, new_list])
     await db.flush()
 
@@ -141,18 +153,18 @@ async def seed(db: AsyncSession, email: str, password: str, *, reset: bool = Fal
         db.add(p)
         await db.flush()
         products[sku] = (p, Decimal(price), Decimal(cost) if cost else None)
-        db.add(ProductPrice(tenant_id=tid, product_id=p.id, price_list_id=old_list.id,
+        db.add(ProductPrice(tenant_id=tid, branch_id=rid, product_id=p.id, price_list_id=old_list.id,
                             unit_price=Decimal(price) - 1, currency=CURRENCY, sheet_quantity=stock + 40,
                             effective_from=now - timedelta(days=9), effective_to=now - timedelta(days=1)))
-        db.add(ProductPrice(tenant_id=tid, product_id=p.id, price_list_id=new_list.id,
+        db.add(ProductPrice(tenant_id=tid, branch_id=rid, product_id=p.id, price_list_id=new_list.id,
                             unit_price=Decimal(price), currency=CURRENCY, sheet_quantity=stock,
                             unit_cost=Decimal(cost) if cost else None,
                             effective_from=now - timedelta(days=1), effective_to=None))
-        db.add(Inventory(tenant_id=tid, product_id=p.id, quantity_on_hand=stock))
+        db.add(Inventory(tenant_id=tid, branch_id=rid, product_id=p.id, quantity_on_hand=stock))
 
     customers = []
     for i, (name, zone_name, gap) in enumerate(CUSTOMERS):
-        c = Customer(tenant_id=tid, name=name, company=name, whatsapp_number=f"+96650000{i:04d}",
+        c = Customer(tenant_id=tid, branch_id=rid, name=name, company=name, whatsapp_number=f"+96650000{i:04d}",
                      address=f"{zone_name}, Riyadh", zone_id=zones[zone_name].id)
         db.add(c)
         customers.append((c, zone_name, gap))
@@ -184,7 +196,7 @@ async def seed(db: AsyncSession, email: str, password: str, *, reset: bool = Fal
         if n % 17 == 0 and status == "completed":
             status = "cancelled"
         driver = drivers.get(zone_name)
-        order = Order(tenant_id=tid, order_number=f"ORD-{n:05d}", customer_id=c.id, customer_name=c.name,
+        order = Order(tenant_id=tid, branch_id=rid, order_number=f"ORD-{n:05d}", customer_id=c.id, customer_name=c.name,
                       customer_company=c.company, whatsapp_number=c.whatsapp_number, status=status,
                       currency=CURRENCY, price_list_id=new_list.id, zone_id=c.zone_id,
                       assigned_driver_id=driver.id if driver and status in ("dispatched", "delivered", "completed") else None,
@@ -216,7 +228,7 @@ async def seed(db: AsyncSession, email: str, password: str, *, reset: bool = Fal
     alnoor = next(c for c, *_ in customers if c.name == "Al Noor Grocery")
     tom, tom_price, tom_cost = products["TOM-5"]
     late_at = now - timedelta(hours=31)
-    late = Order(tenant_id=tid, order_number=f"ORD-{len(planned) + 1:05d}", customer_id=alnoor.id,
+    late = Order(tenant_id=tid, branch_id=rid, order_number=f"ORD-{len(planned) + 1:05d}", customer_id=alnoor.id,
                  customer_name=alnoor.name, customer_company=alnoor.company, whatsapp_number=alnoor.whatsapp_number,
                  status="dispatched", currency=CURRENCY, price_list_id=new_list.id, zone_id=alnoor.zone_id,
                  assigned_driver_id=drivers["Riyadh North"].id, confirmed_at=late_at - timedelta(hours=3),
@@ -235,7 +247,7 @@ async def seed(db: AsyncSession, email: str, password: str, *, reset: bool = Fal
     hayat = next(c for c, *_ in customers if c.name == "Hayat Minimarket")
     mango, mango_price, _ = products["MAN-4"]
     held_num = f"ORD-{len(planned) + 2:05d}"
-    held = Order(tenant_id=tid, order_number=held_num, customer_id=hayat.id, customer_name=hayat.name,
+    held = Order(tenant_id=tid, branch_id=rid, order_number=held_num, customer_id=hayat.id, customer_name=hayat.name,
                  customer_company=hayat.company, whatsapp_number=hayat.whatsapp_number,
                  status="requires_human_review", currency=CURRENCY, zone_id=hayat.zone_id,
                  total_amount=mango_price * 50, created_at=now - timedelta(minutes=40))
@@ -243,7 +255,7 @@ async def seed(db: AsyncSession, email: str, password: str, *, reset: bool = Fal
     await db.flush()
     db.add(OrderItem(tenant_id=tid, order_id=held.id, product_id=mango.id, sku="MAN-4", product_name=mango.name_en,
                      quantity=50, unit_price=mango_price, line_total=mango_price * 50, available_at_order=32))
-    db.add(Escalation(tenant_id=tid, reason_type="insufficient_stock",
+    db.add(Escalation(tenant_id=tid, branch_id=rid, reason_type="insufficient_stock",
                       context={"order_number": held_num,
                                "shortfalls": [{"sku": "MAN-4", "requested": 50, "available": 32}]},
                       ai_recommendation="Insufficient stock -> MAN-4: requested 50, only 32 available. "
@@ -277,7 +289,7 @@ async def seed(db: AsyncSession, email: str, password: str, *, reset: bool = Fal
     ]
     for c, lang, msgs in chats:
         start = now - timedelta(hours=rng.uniform(1, 20))
-        conv = Conversation(tenant_id=tid, customer_number=c.whatsapp_number, customer_name=c.name,
+        conv = Conversation(tenant_id=tid, branch_id=rid, customer_number=c.whatsapp_number, customer_name=c.name,
                             language=lang, status="active", last_message_at=start + timedelta(minutes=len(msgs)))
         db.add(conv)
         await db.flush()
@@ -287,8 +299,80 @@ async def seed(db: AsyncSession, email: str, password: str, *, reset: bool = Fal
                            created_at=start + timedelta(minutes=i)))
 
     await db.commit()
+    await _seed_jeddah(db, tid, jeddah.id, products, rng, now, first_number=len(planned) + 3)
     await _seed_prospects(db, tid, rep, zones, now)
     return tenant
+
+
+# Jeddah: its own prices (a little higher), stock, zones, driver and customers
+JEDDAH_PRICES = {"TOM-5": ("37.00", 120), "POT-10": ("23.00", 90), "CUC-5": ("29.50", 60),
+                 "ORA-8": ("44.00", 40), "MAN-4": ("50.00", 25), "ONI-10": ("19.00", 70)}
+JEDDAH_ZONES = ["Jeddah Al Rawdah", "Jeddah Al Safa"]
+JEDDAH_CUSTOMERS = [("Al Balad Grocery", "Jeddah Al Rawdah", 4), ("Corniche Fresh Mart", "Jeddah Al Safa", 5)]
+
+
+async def _seed_jeddah(db: AsyncSession, tid, bid, products: dict, rng: random.Random, now: datetime,
+                       first_number: int) -> None:
+    plist = PriceList(tenant_id=tid, branch_id=bid, version=1, status="active",
+                      source_filename="jeddah-prices-v1.xlsx", activated_at=now - timedelta(days=2))
+    db.add(plist)
+    await db.flush()
+    prices = {}
+    for sku, (price, stock) in JEDDAH_PRICES.items():
+        p, _, cost = products[sku]
+        prices[sku] = (p, Decimal(price), cost)
+        db.add(ProductPrice(tenant_id=tid, branch_id=bid, product_id=p.id, price_list_id=plist.id,
+                            unit_price=Decimal(price), currency=CURRENCY, sheet_quantity=stock,
+                            effective_from=now - timedelta(days=2), effective_to=None))
+        db.add(Inventory(tenant_id=tid, branch_id=bid, product_id=p.id, quantity_on_hand=stock))
+
+    zones = {}
+    for name in JEDDAH_ZONES:
+        z = Zone(tenant_id=tid, branch_id=bid, name=name, description=f"{name} delivery area")
+        db.add(z)
+        zones[name] = z
+    await db.flush()
+    driver = User(tenant_id=tid, branch_id=bid, email=f"hamad.demo.{uuid.uuid4().hex[:6]}@example.com",
+                  password_hash=hash_password(uuid.uuid4().hex), full_name="Hamad", role=UserRole.DRIVER.value)
+    db.add(driver)
+    await db.flush()
+    for z in zones.values():
+        db.add(DriverZone(tenant_id=tid, driver_id=driver.id, zone_id=z.id))
+
+    n = first_number
+    for i, (name, zone_name, gap) in enumerate(JEDDAH_CUSTOMERS):
+        c = Customer(tenant_id=tid, branch_id=bid, name=name, company=name,
+                     whatsapp_number=f"+96655000{i:04d}", address=f"{zone_name}, Jeddah",
+                     zone_id=zones[zone_name].id)
+        db.add(c)
+        await db.flush()
+        t = 30.0
+        while t > 2:
+            created = now - timedelta(days=t, hours=rng.uniform(0, 6))
+            order = Order(tenant_id=tid, branch_id=bid, order_number=f"ORD-{n:05d}", customer_id=c.id,
+                          customer_name=c.name, customer_company=c.company, whatsapp_number=c.whatsapp_number,
+                          status="completed", currency=CURRENCY, price_list_id=plist.id, zone_id=c.zone_id,
+                          assigned_driver_id=driver.id, confirmed_at=created, created_at=created,
+                          total_amount=Decimal("0"))
+            db.add(order)
+            await db.flush()
+            total = Decimal("0")
+            for sku in rng.sample(["TOM-5", "POT-10", "CUC-5", "ONI-10"], 2):
+                p, price, cost = prices[sku]
+                qty = rng.randint(5, 25)
+                total += price * qty
+                db.add(OrderItem(tenant_id=tid, order_id=order.id, product_id=p.id, sku=sku,
+                                 product_name=p.name_en, quantity=qty, unit_price=price,
+                                 line_total=price * qty, unit_cost=cost, created_at=created))
+            order.total_amount = total
+            at, prev = created, None
+            for st in FLOW:
+                db.add(OrderEvent(tenant_id=tid, order_id=order.id, from_status=prev, to_status=st,
+                                  actor_name="Salesman AI" if st == "confirmed" else "Team", created_at=at))
+                prev, at = st, at + timedelta(hours=rng.uniform(1, 4))
+            n += 1
+            t -= gap * rng.uniform(0.8, 1.2)
+    await db.commit()
 
 
 # new shops in the pipeline: name, source, zone, phone, status, note
@@ -307,7 +391,8 @@ async def _seed_prospects(db: AsyncSession, tid, rep: User, zones: dict, now: da
     from app.modules.prospects.service import refresh_winbacks
 
     for i, (name, source, zone_name, phone, status, note) in enumerate(PROSPECTS):
-        p = Prospect(tenant_id=tid, kind="new", source=source, status=status, name=name, phone=phone,
+        p = Prospect(tenant_id=tid, branch_id=zones[zone_name].branch_id if zone_name else None,
+                     kind="new", source=source, status=status, name=name, phone=phone,
                      zone_id=zones[zone_name].id if zone_name else None,
                      area="Al Yasmin" if zone_name is None else None, category="Grocery",
                      assigned_to_id=rep.id, created_by_id=rep.id,

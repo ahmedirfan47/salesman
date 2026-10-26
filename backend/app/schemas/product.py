@@ -43,5 +43,7 @@ class ProductCatalogRow(BaseModel):
     category: str | None
     is_active: bool
     unit_price: float | None
+    price_min: float | None = None
+    price_max: float | None = None
     currency: str | None
     stock: int

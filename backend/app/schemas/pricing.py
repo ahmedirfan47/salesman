@@ -30,6 +30,7 @@ class PriceListOut(BaseModel):
 
     id: uuid.UUID
     tenant_id: uuid.UUID
+    branch_id: uuid.UUID
     version: int
     source_filename: str | None
     status: str
@@ -43,6 +44,7 @@ class ProductPriceOut(BaseModel):
 
     id: uuid.UUID
     product_id: uuid.UUID
+    branch_id: uuid.UUID
     price_list_id: uuid.UUID
     unit_price: Decimal
     currency: str

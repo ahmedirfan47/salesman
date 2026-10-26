@@ -1,12 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useBranches } from "@/lib/branches";
 import { Info } from "lucide-react";
 import { PlanCard } from "@/components/plan-card";
 import { SALES_EMAIL } from "@/lib/plans";
 
 export default function BillingPage() {
+  const { branches: all } = useBranches();
+  const active = all.filter((b) => b.is_active).length;
   const [branches, setBranches] = useState(1);
+  // start the calculator at the number of branches set up in Salesman
+  useEffect(() => { if (active > 0) setBranches(active); }, [active]);
   const subject = encodeURIComponent(`Salesman subscription — ${branches} branch${branches === 1 ? "" : "es"}`);
 
   return (

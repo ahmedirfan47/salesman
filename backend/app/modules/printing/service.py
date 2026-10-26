@@ -41,6 +41,7 @@ async def enqueue_for_order(
     passed by the caller (avoids lazy-loading order.items inside async)."""
     job = PrintJob(
         tenant_id=tenant_id,
+        branch_id=order.branch_id,
         order_id=order.id,
         payload=_slip_payload(order, items),
         status="queued",
@@ -52,9 +53,12 @@ async def enqueue_for_order(
 
 
 async def list_jobs(
-    db: AsyncSession, tenant_id: uuid.UUID, *, status: str | None = None
+    db: AsyncSession, tenant_id: uuid.UUID, *, status: str | None = None, scope: uuid.UUID | None = None
 ) -> list[PrintJob]:
+    """Each branch's print agent signs in as staff of that branch, so it only gets that branch's slips."""
     stmt = select(PrintJob).where(PrintJob.tenant_id == tenant_id)
+    if scope is not None:
+        stmt = stmt.where(PrintJob.branch_id == scope)
     if status:
         stmt = stmt.where(PrintJob.status == status)
     return list(await db.scalars(stmt.order_by(PrintJob.created_at)))

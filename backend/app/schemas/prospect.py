@@ -19,6 +19,7 @@ class ProspectCreate(BaseModel):
     zone_id: uuid.UUID | None = None
     notes: str | None = Field(default=None, max_length=4000)
     assigned_to_id: uuid.UUID | None = None
+    branch_id: uuid.UUID | None = None
 
 
 class ProspectUpdate(BaseModel):
@@ -33,6 +34,7 @@ class ProspectUpdate(BaseModel):
     status: ProspectStatus | None = None
     lost_reason: str | None = Field(default=None, max_length=255)
     assigned_to_id: uuid.UUID | None = None
+    branch_id: uuid.UUID | None = None
 
 
 class PlaceAdd(BaseModel):
@@ -65,6 +67,7 @@ class ConvertIn(BaseModel):
 # ---- output ----
 class ProspectOut(BaseModel):
     id: uuid.UUID
+    branch_id: uuid.UUID | None
     kind: Literal["new", "winback"]
     source: str
     status: ProspectStatus

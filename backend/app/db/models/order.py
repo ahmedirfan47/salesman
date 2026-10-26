@@ -22,6 +22,9 @@ class Order(UUIDPKMixin, TimestampMixin, Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True, nullable=False
     )
+    branch_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("branches.id"), index=True, nullable=False
+    )
     order_number: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
 
     # customer link is optional for now (customers module comes with the agent)

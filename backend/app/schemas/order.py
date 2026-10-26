@@ -16,6 +16,8 @@ class OrderCreate(BaseModel):
     customer_name: str | None = None
     customer_company: str | None = None
     whatsapp_number: str | None = None
+    # optional: defaults to the customer's branch, else your branch, else the default branch
+    branch_id: uuid.UUID | None = None
 
 
 class OrderItemOut(BaseModel):
@@ -34,6 +36,7 @@ class OrderOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    branch_id: uuid.UUID
     order_number: str
     status: str
     customer_name: str | None
@@ -52,6 +55,7 @@ class EscalationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    branch_id: uuid.UUID
     reason_type: str
     context: dict
     ai_recommendation: str | None

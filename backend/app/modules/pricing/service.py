@@ -1,14 +1,17 @@
 """Pricing / price-list versioning service.
 
+Each branch has its own price list and its own stock: a list is uploaded for
+one branch, and activating it changes only that branch's prices and stock.
+
 Core rule: uploading a new price list NEVER overwrites history.
-- Each upload is a new PriceList row with an incrementing version.
+- Each upload is a new PriceList row with an incrementing version (per branch).
 - Its price lines are stored as 'parked' ProductPrice rows (a zero-width
   time window) carrying the price + the sheet's declared quantity.
 - Activating a list, in ONE transaction:
-    1. closes the currently-active price rows (effective_to = now),
-    2. marks the old active list 'superseded',
+    1. closes the branch's currently-active price rows (effective_to = now),
+    2. marks the branch's old active list 'superseded',
     3. opens this list's parked rows (effective_from = now, effective_to = NULL),
-    4. sets inventory to the sheet quantities, writing immutable ledger rows,
+    4. sets the branch's inventory to the sheet quantities, writing immutable ledger rows,
     5. copies any costs from the sheet onto the products (cost_price), so
        orders from now on snapshot that cost for margin analytics,
     6. marks this list 'active'.
@@ -20,6 +23,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.branches import default_branch
 from app.db.models.inventory import Inventory
 from app.db.models.inventory_transaction import InventoryTransaction
 from app.db.models.price_list import PriceList
@@ -28,9 +32,11 @@ from app.db.models.product_price import ProductPrice
 from app.schemas.pricing import PriceLineIn, PriceListCreate
 
 
-async def _next_version(db: AsyncSession, tenant_id: uuid.UUID) -> int:
+async def _next_version(db: AsyncSession, tenant_id: uuid.UUID, branch_id: uuid.UUID) -> int:
     current = await db.scalar(
-        select(func.max(PriceList.version)).where(PriceList.tenant_id == tenant_id)
+        select(func.max(PriceList.version)).where(
+            PriceList.tenant_id == tenant_id, PriceList.branch_id == branch_id
+        )
     )
     return (current or 0) + 1
 
@@ -57,14 +63,18 @@ async def create_price_list(
     tenant_id: uuid.UUID,
     data: PriceListCreate,
     *,
+    branch_id: uuid.UUID | None = None,
     uploaded_by: uuid.UUID | None = None,
     file_hash: str | None = None,
 ) -> PriceList:
     """Create a DRAFT (pending) price list plus parked price lines. Not yet active."""
     now = datetime.now(timezone.utc)
-    version = await _next_version(db, tenant_id)
+    if branch_id is None:
+        branch_id = (await default_branch(db, tenant_id)).id
+    version = await _next_version(db, tenant_id, branch_id)
     price_list = PriceList(
         tenant_id=tenant_id,
+        branch_id=branch_id,
         version=version,
         source_filename=data.source_filename,
         file_hash=file_hash,
@@ -83,6 +93,7 @@ async def create_price_list(
         db.add(
             ProductPrice(
                 tenant_id=tenant_id,
+                branch_id=branch_id,
                 product_id=product.id,
                 price_list_id=price_list.id,
                 unit_price=line.unit_price,
@@ -117,16 +128,23 @@ async def activate_price_list(
         raise HTTPException(status.HTTP_409_CONFLICT, "Price list is already active")
     if price_list.status == "superseded":
         raise HTTPException(status.HTTP_409_CONFLICT, "Price list was already superseded")
+    branch_id = price_list.branch_id
 
     for p in await db.scalars(
         select(ProductPrice).where(
-            ProductPrice.tenant_id == tenant_id, ProductPrice.effective_to.is_(None)
+            ProductPrice.tenant_id == tenant_id,
+            ProductPrice.branch_id == branch_id,
+            ProductPrice.effective_to.is_(None),
         )
     ):
         p.effective_to = now
 
     prev_active = await db.scalar(
-        select(PriceList).where(PriceList.tenant_id == tenant_id, PriceList.status == "active")
+        select(PriceList).where(
+            PriceList.tenant_id == tenant_id,
+            PriceList.branch_id == branch_id,
+            PriceList.status == "active",
+        )
     )
     if prev_active:
         prev_active.status = "superseded"
@@ -151,6 +169,7 @@ async def activate_price_list(
             await _set_inventory(
                 db,
                 tenant_id=tenant_id,
+                branch_id=branch_id,
                 product_id=p.product_id,
                 new_quantity=p.sheet_quantity,
                 reason="price_list_upload",
@@ -170,6 +189,7 @@ async def _set_inventory(
     db: AsyncSession,
     *,
     tenant_id: uuid.UUID,
+    branch_id: uuid.UUID,
     product_id: uuid.UUID,
     new_quantity: int,
     reason: str,
@@ -178,12 +198,15 @@ async def _set_inventory(
 ) -> None:
     inv = await db.scalar(
         select(Inventory).where(
-            Inventory.tenant_id == tenant_id, Inventory.product_id == product_id
+            Inventory.tenant_id == tenant_id,
+            Inventory.branch_id == branch_id,
+            Inventory.product_id == product_id,
         )
     )
     before = inv.quantity_on_hand if inv else 0
     if inv is None:
-        inv = Inventory(tenant_id=tenant_id, product_id=product_id, quantity_on_hand=new_quantity)
+        inv = Inventory(tenant_id=tenant_id, branch_id=branch_id, product_id=product_id,
+                        quantity_on_hand=new_quantity)
         db.add(inv)
     else:
         inv.quantity_on_hand = new_quantity
@@ -191,6 +214,7 @@ async def _set_inventory(
     db.add(
         InventoryTransaction(
             tenant_id=tenant_id,
+            branch_id=branch_id,
             product_id=product_id,
             delta=new_quantity - before,
             quantity_before=before,
@@ -203,25 +227,31 @@ async def _set_inventory(
     )
 
 
-async def list_price_lists(db: AsyncSession, tenant_id: uuid.UUID) -> list[PriceList]:
-    return list(
-        await db.scalars(
-            select(PriceList)
-            .where(PriceList.tenant_id == tenant_id)
-            .order_by(PriceList.version.desc())
-        )
-    )
+async def list_price_lists(
+    db: AsyncSession, tenant_id: uuid.UUID, branch_id: uuid.UUID | None = None
+) -> list[PriceList]:
+    q = select(PriceList).where(PriceList.tenant_id == tenant_id)
+    if branch_id is not None:
+        q = q.where(PriceList.branch_id == branch_id)
+    return list(await db.scalars(q.order_by(PriceList.created_at.desc())))
 
 
-async def get_current_price(db: AsyncSession, tenant_id: uuid.UUID, sku: str) -> dict | None:
+async def get_current_price(
+    db: AsyncSession, tenant_id: uuid.UUID, sku: str, branch_id: uuid.UUID
+) -> dict | None:
+    """Today's price and stock for a SKU at one branch."""
     row = await db.execute(
         select(Product, ProductPrice, Inventory, PriceList)
         .join(ProductPrice, ProductPrice.product_id == Product.id)
         .join(PriceList, PriceList.id == ProductPrice.price_list_id)
-        .outerjoin(Inventory, Inventory.product_id == Product.id)
+        .outerjoin(
+            Inventory,
+            (Inventory.product_id == Product.id) & (Inventory.branch_id == ProductPrice.branch_id),
+        )
         .where(
             Product.tenant_id == tenant_id,
             Product.sku == sku,
+            ProductPrice.branch_id == branch_id,
             ProductPrice.effective_to.is_(None),
         )
     )
@@ -242,15 +272,11 @@ async def get_current_price(db: AsyncSession, tenant_id: uuid.UUID, sku: str) ->
 
 
 async def price_history(
-    db: AsyncSession, tenant_id: uuid.UUID, product_id: uuid.UUID
+    db: AsyncSession, tenant_id: uuid.UUID, product_id: uuid.UUID, branch_id: uuid.UUID | None = None
 ) -> list[ProductPrice]:
-    return list(
-        await db.scalars(
-            select(ProductPrice)
-            .where(
-                ProductPrice.tenant_id == tenant_id,
-                ProductPrice.product_id == product_id,
-            )
-            .order_by(ProductPrice.effective_from.desc())
-        )
+    q = select(ProductPrice).where(
+        ProductPrice.tenant_id == tenant_id, ProductPrice.product_id == product_id
     )
+    if branch_id is not None:
+        q = q.where(ProductPrice.branch_id == branch_id)
+    return list(await db.scalars(q.order_by(ProductPrice.effective_from.desc())))

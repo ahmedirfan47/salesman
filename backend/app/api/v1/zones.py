@@ -2,6 +2,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, status
 
+from app.core.branches import BranchScope, resolve_branch
 from app.core.deps import CurrentUser, DBSession, require_capability
 from app.core.permissions import Capability
 from app.modules.zones import service
@@ -20,18 +21,19 @@ _dispatch = Depends(require_capability(Capability.DISPATCH_ORDER))
 
 
 @router.get("", response_model=list[ZoneOut])
-async def list_zones(db: DBSession, user: CurrentUser) -> list[ZoneOut]:
-    return await service.list_zones(db, user.tenant_id)
+async def list_zones(db: DBSession, user: CurrentUser, scope: BranchScope) -> list[ZoneOut]:
+    return await service.list_zones(db, user.tenant_id, scope)
 
 
 @router.post("", response_model=ZoneOut, status_code=status.HTTP_201_CREATED, dependencies=[_manage])
-async def create_zone(data: ZoneCreate, db: DBSession, user: CurrentUser) -> ZoneOut:
-    return await service.create_zone(db, user.tenant_id, data.name, data.description)
+async def create_zone(data: ZoneCreate, db: DBSession, user: CurrentUser, scope: BranchScope) -> ZoneOut:
+    branch_id = await resolve_branch(db, user.tenant_id, scope, data.branch_id, required=True)
+    return await service.create_zone(db, user.tenant_id, data.name, data.description, branch_id)
 
 
 @router.delete("/{zone_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[_manage])
-async def delete_zone(zone_id: uuid.UUID, db: DBSession, user: CurrentUser) -> None:
-    await service.delete_zone(db, user.tenant_id, zone_id)
+async def delete_zone(zone_id: uuid.UUID, db: DBSession, user: CurrentUser, scope: BranchScope) -> None:
+    await service.delete_zone(db, user.tenant_id, zone_id, scope)
 
 
 @router.get("/drivers/{driver_id}/zones", response_model=list[uuid.UUID])
@@ -56,9 +58,9 @@ async def suggest_driver(zone_id: uuid.UUID, db: DBSession, user: CurrentUser) -
 
 @router.post("/assign/{order_id}", response_model=OrderOut, dependencies=[_dispatch])
 async def assign_order(
-    order_id: uuid.UUID, data: OrderAssign, db: DBSession, user: CurrentUser
+    order_id: uuid.UUID, data: OrderAssign, db: DBSession, user: CurrentUser, scope: BranchScope
 ) -> OrderOut:
-    return await service.assign_order(db, user.tenant_id, order_id, data.zone_id, data.driver_id)
+    return await service.assign_order(db, user.tenant_id, order_id, data.zone_id, data.driver_id, scope)
 
 
 @router.get("/my-deliveries/list", response_model=list[OrderOut])

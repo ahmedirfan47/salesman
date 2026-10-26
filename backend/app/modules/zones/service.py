@@ -1,6 +1,6 @@
 """Zones + driver assignment.
 
-- zones: create/list delivery areas
+- zones: create/list delivery areas (each zone belongs to one branch)
 - driver<->zone links: which drivers cover which zones
 - suggestion: for an order's zone, propose the covering driver with the fewest
   active (confirmed/preparing/dispatched) deliveries -- simple load balancing
@@ -12,6 +12,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.branches import in_scope
 from app.db.models.order import Order
 from app.db.models.order_event import OrderEvent
 from app.db.models.user import User
@@ -21,28 +22,33 @@ _ACTIVE_STATUSES = ("confirmed", "preparing", "dispatched")
 
 
 # --- zones ---
-async def create_zone(db: AsyncSession, tenant_id: uuid.UUID, name: str, description: str | None) -> Zone:
+async def create_zone(
+    db: AsyncSession, tenant_id: uuid.UUID, name: str, description: str | None, branch_id: uuid.UUID
+) -> Zone:
     exists = await db.scalar(
         select(Zone).where(Zone.tenant_id == tenant_id, Zone.name == name)
     )
     if exists:
         raise HTTPException(status.HTTP_409_CONFLICT, f"Zone '{name}' already exists")
-    zone = Zone(tenant_id=tenant_id, name=name, description=description)
+    zone = Zone(tenant_id=tenant_id, branch_id=branch_id, name=name, description=description)
     db.add(zone)
     await db.commit()
     await db.refresh(zone)
     return zone
 
 
-async def list_zones(db: AsyncSession, tenant_id: uuid.UUID) -> list[Zone]:
-    return list(await db.scalars(
-        select(Zone).where(Zone.tenant_id == tenant_id).order_by(Zone.name)
-    ))
+async def list_zones(db: AsyncSession, tenant_id: uuid.UUID, scope: uuid.UUID | None = None) -> list[Zone]:
+    q = select(Zone).where(Zone.tenant_id == tenant_id)
+    if scope is not None:
+        q = q.where(Zone.branch_id == scope)
+    return list(await db.scalars(q.order_by(Zone.name)))
 
 
-async def delete_zone(db: AsyncSession, tenant_id: uuid.UUID, zone_id: uuid.UUID) -> None:
+async def delete_zone(
+    db: AsyncSession, tenant_id: uuid.UUID, zone_id: uuid.UUID, scope: uuid.UUID | None = None
+) -> None:
     zone = await db.scalar(select(Zone).where(Zone.id == zone_id, Zone.tenant_id == tenant_id))
-    if not zone:
+    if not zone or not in_scope(scope, zone.branch_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Zone not found")
     await db.delete(zone)
     await db.commit()
@@ -57,6 +63,11 @@ async def set_driver_zones(
     )
     if not driver:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Driver not found")
+    zones = list(await db.scalars(select(Zone).where(Zone.id.in_(zone_ids), Zone.tenant_id == tenant_id)))
+    if len(zones) != len(set(zone_ids)):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Zone not found")
+    if driver.branch_id is not None and any(z.branch_id != driver.branch_id for z in zones):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "A driver can only cover zones of their own branch")
     # clear existing
     existing = list(await db.scalars(select(DriverZone).where(DriverZone.driver_id == driver_id)))
     for dz in existing:
@@ -106,17 +117,19 @@ async def suggest_driver(
 # --- order assignment ---
 async def assign_order(
     db: AsyncSession, tenant_id: uuid.UUID, order_id: uuid.UUID,
-    zone_id: uuid.UUID | None, driver_id: uuid.UUID | None,
+    zone_id: uuid.UUID | None, driver_id: uuid.UUID | None, scope: uuid.UUID | None = None,
 ) -> Order:
     order = await db.scalar(
         select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id)
     )
-    if not order:
+    if not order or not in_scope(scope, order.branch_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Order not found")
     if zone_id is not None:
         zone = await db.scalar(select(Zone).where(Zone.id == zone_id, Zone.tenant_id == tenant_id))
         if not zone:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Zone not found")
+        if zone.branch_id != order.branch_id:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "That zone belongs to another branch")
         order.zone_id = zone_id
     if driver_id is not None:
         driver = await db.scalar(
@@ -124,6 +137,8 @@ async def assign_order(
         )
         if not driver:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Driver not found")
+        if driver.branch_id is not None and driver.branch_id != order.branch_id:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "That driver works for another branch")
         order.assigned_driver_id = driver_id
     await db.commit()
     await db.refresh(order)

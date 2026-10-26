@@ -1,4 +1,5 @@
 """Import all models here so Alembic autogenerate sees them via Base.metadata."""
+from app.db.models.branch import Branch
 from app.db.models.customer import Customer
 from app.db.models.conversation import Conversation
 from app.db.models.escalation import Escalation
@@ -19,7 +20,7 @@ from app.db.models.user import User
 from app.db.models.zone import DriverZone, Zone
 
 __all__ = [
-    "Tenant", "User", "Product", "PriceList", "ProductPrice",
+    "Tenant", "Branch", "User", "Product", "PriceList", "ProductPrice",
     "Inventory", "InventoryTransaction", "Order", "OrderItem", "OrderEvent",
     "Escalation", "PrintJob", "Conversation", "Message", "Zone", "DriverZone", "Customer", "Job",
     "Prospect", "ProspectActivity",

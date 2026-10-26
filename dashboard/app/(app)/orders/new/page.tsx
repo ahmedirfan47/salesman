@@ -8,13 +8,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Plus, Trash2, ArrowLeft } from "lucide-react";
 import Link from "next/link";
+import { useAllBranchesView, useBranches } from "@/lib/branches";
 
 type Product = { id: string; sku: string; name_en: string; is_active: boolean };
-type Customer = { id: string; name: string; company: string | null; zone_id: string | null };
+type Customer = { id: string; branch_id: string; name: string; company: string | null; zone_id: string | null };
 type Line = { sku: string; quantity: number };
 
 export default function NewOrderPage() {
   const router = useRouter();
+  const { branches, nameOf } = useBranches();
+  const allView = useAllBranchesView();
+  const [branchId, setBranchId] = useState("");  // only asked when looking at all branches
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerId, setCustomerId] = useState("");   // saved customer
@@ -54,6 +58,7 @@ export default function NewOrderPage() {
       const body: Record<string, unknown> = { items };
       if (customerId) body.customer_id = customerId;
       else if (walkIn) body.customer_name = walkIn;
+      if (allView && !customerId && branchId) body.branch_id = branchId;
 
       const order = await api("/orders", { method: "POST", body: JSON.stringify(body) });
       if (order.status === "requires_human_review") {
@@ -86,7 +91,9 @@ export default function NewOrderPage() {
                 className="w-full rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm">
                 <option value="">— Walk-in / not saved —</option>
                 {customers.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}{c.company ? ` (${c.company})` : ""}</option>
+                  <option key={c.id} value={c.id}>
+                    {c.name}{c.company ? ` (${c.company})` : ""}{allView ? ` · ${nameOf(c.branch_id)}` : ""}
+                  </option>
                 ))}
               </select>
               {customerId && !selectedCustomer?.zone_id && (
@@ -100,6 +107,18 @@ export default function NewOrderPage() {
             <Input placeholder="Customer name (optional)" value={walkIn} onChange={(e) => setWalkIn(e.target.value)} />
           )}
         </div>
+
+        {allView && !customerId && (
+          <div className="mb-5">
+            <label className="mb-1 block text-sm font-medium">Branch</label>
+            <select value={branchId} onChange={(e) => setBranchId(e.target.value)}
+              className="w-full rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm">
+              <option value="">Default branch</option>
+              {branches.filter((b) => b.is_active).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+            <p className="mt-1 text-xs text-slate-500">Prices and stock come from this branch. A saved customer&apos;s order goes to their branch.</p>
+          </div>
+        )}
 
         <label className="mb-2 block text-sm font-medium">Items</label>
         <div className="space-y-3">

@@ -1,11 +1,17 @@
 """Agent tools. Each tool wraps a real service call against the tenant's data,
 so the model can look up TRUE prices/stock and place orders -- never guess.
-"""
-import uuid
 
-from sqlalchemy import select
+Tools run in the context of one branch (the branch whose WhatsApp number the
+customer wrote to) and, when known, the customer's own number.
+"""
+import re
+import uuid
+from dataclasses import dataclass
+
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.customer import Customer
 from app.db.models.product import Product
 from app.modules.orders import service as orders_service
 from app.modules.pricing import service as pricing_service
@@ -71,6 +77,13 @@ TOOL_SCHEMAS = [
 ]
 
 
+@dataclass
+class ToolContext:
+    tenant_id: uuid.UUID
+    branch_id: uuid.UUID
+    customer_number: str | None = None
+
+
 # ---- implementations ----
 async def _search_products(db: AsyncSession, tenant_id: uuid.UUID, query: str) -> dict:
     like = f"%{query.strip()}%"
@@ -91,8 +104,8 @@ async def _search_products(db: AsyncSession, tenant_id: uuid.UUID, query: str) -
     return {"found": True, "products": products}
 
 
-async def _get_price_and_stock(db: AsyncSession, tenant_id: uuid.UUID, sku: str) -> dict:
-    result = await pricing_service.get_current_price(db, tenant_id, sku)
+async def _get_price_and_stock(db: AsyncSession, ctx: ToolContext, sku: str) -> dict:
+    result = await pricing_service.get_current_price(db, ctx.tenant_id, sku, ctx.branch_id)
     if not result:
         return {"available": False, "message": f"No active price found for SKU '{sku}'."}
     return {
@@ -105,15 +118,33 @@ async def _get_price_and_stock(db: AsyncSession, tenant_id: uuid.UUID, sku: str)
     }
 
 
+async def _known_customer(db: AsyncSession, ctx: ToolContext) -> Customer | None:
+    digits = re.sub(r"\D", "", ctx.customer_number or "")
+    if not digits:
+        return None
+    return await db.scalar(
+        select(Customer).where(
+            Customer.tenant_id == ctx.tenant_id,
+            func.regexp_replace(Customer.whatsapp_number, "[^0-9]", "", "g") == digits,
+        )
+    )
+
+
 async def _place_order(
-    db: AsyncSession, tenant_id: uuid.UUID, items: list[dict], customer_name: str | None = None
+    db: AsyncSession, ctx: ToolContext, items: list[dict], customer_name: str | None = None
 ) -> dict:
+    # Link the order to the customer on file (zone, delivery driver, order updates)
+    # and to the branch the customer contacted.
+    customer = await _known_customer(db, ctx)
     order = await orders_service.create_order(
         db,
-        tenant_id,
+        ctx.tenant_id,
         OrderCreate(
             items=[OrderItemIn(sku=i["sku"], quantity=int(i["quantity"])) for i in items],
-            customer_name=customer_name,
+            customer_id=customer.id if customer else None,
+            customer_name=customer_name or (customer.name if customer else None),
+            whatsapp_number=ctx.customer_number,
+            branch_id=ctx.branch_id,
         ),
     )
     return {
@@ -125,16 +156,12 @@ async def _place_order(
     }
 
 
-async def dispatch(
-    db: AsyncSession, tenant_id: uuid.UUID, name: str, args: dict
-) -> dict:
+async def dispatch(db: AsyncSession, ctx: ToolContext, name: str, args: dict) -> dict:
     """Route a tool call from the model to the matching implementation."""
     if name == "search_products":
-        return await _search_products(db, tenant_id, args.get("query", ""))
+        return await _search_products(db, ctx.tenant_id, args.get("query", ""))
     if name == "get_price_and_stock":
-        return await _get_price_and_stock(db, tenant_id, args.get("sku", ""))
+        return await _get_price_and_stock(db, ctx, args.get("sku", ""))
     if name == "place_order":
-        return await _place_order(
-            db, tenant_id, args.get("items", []), args.get("customer_name")
-        )
+        return await _place_order(db, ctx, args.get("items", []), args.get("customer_name"))
     return {"error": f"Unknown tool '{name}'"}

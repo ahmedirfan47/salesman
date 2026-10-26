@@ -1,6 +1,7 @@
 """Prospect pipeline: create, import, Google Maps add, win-back, contact, convert.
 
-Every query is tenant-scoped. A shop is identified by its normalised phone
+Every query is tenant-scoped, and branch staff see their own branch's
+prospects plus those not yet given a branch. A shop is identified by its normalised phone
 number (and, for Google results, its place ID), so the same shop is never
 added twice and a shop that is already a customer is never pitched as new.
 """
@@ -12,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.core.branches import default_branch, get_branch, in_scope
 from app.core.permissions import Capability, has_capability
 from app.db.models.customer import Customer
 from app.db.models.order import Order
@@ -55,9 +57,15 @@ def _log(db: AsyncSession, p: Prospect, kind: str, body: str | None, actor: User
 
 # --- lookups ----------------------------------------------------------------------
 
-async def get_prospect(db: AsyncSession, tenant_id: uuid.UUID, prospect_id: uuid.UUID) -> Prospect:
+def _visible(scope: uuid.UUID | None, branch_id: uuid.UUID | None) -> bool:
+    return branch_id is None or in_scope(scope, branch_id)
+
+
+async def get_prospect(
+    db: AsyncSession, tenant_id: uuid.UUID, prospect_id: uuid.UUID, scope: uuid.UUID | None = None
+) -> Prospect:
     p = await db.scalar(select(Prospect).where(Prospect.id == prospect_id, Prospect.tenant_id == tenant_id))
-    if p is None:
+    if p is None or not _visible(scope, p.branch_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Prospect not found")
     return p
 
@@ -155,7 +163,7 @@ async def _shape(db: AsyncSession, tenant_id: uuid.UUID, prospects: list[Prospec
     for p in prospects:
         priority, reasons = _priority(p, served)
         out.append({
-            "id": p.id, "kind": p.kind, "source": p.source, "status": p.status,
+            "id": p.id, "branch_id": p.branch_id, "kind": p.kind, "source": p.source, "status": p.status,
             "name": p.name, "contact_name": p.contact_name, "phone": p.phone,
             "phone_digits": phone_digits(p.phone), "address": p.address, "area": p.area,
             "category": p.category, "zone_id": p.zone_id, "zone_name": zones.get(p.zone_id),
@@ -168,8 +176,10 @@ async def _shape(db: AsyncSession, tenant_id: uuid.UUID, prospects: list[Prospec
     return out
 
 
-async def detail(db: AsyncSession, tenant_id: uuid.UUID, prospect_id: uuid.UUID) -> dict:
-    p = await get_prospect(db, tenant_id, prospect_id)
+async def detail(
+    db: AsyncSession, tenant_id: uuid.UUID, prospect_id: uuid.UUID, scope: uuid.UUID | None = None
+) -> dict:
+    p = await get_prospect(db, tenant_id, prospect_id, scope)
     row = (await _shape(db, tenant_id, [p]))[0]
     acts = await db.scalars(
         select(ProspectActivity)
@@ -188,10 +198,12 @@ async def detail(db: AsyncSession, tenant_id: uuid.UUID, prospect_id: uuid.UUID)
 
 async def list_prospects(
     db: AsyncSession, tenant_id: uuid.UUID, *, kind: str | None = None, status_: str | None = None,
-    assigned_to: uuid.UUID | None = None, q: str | None = None,
+    assigned_to: uuid.UUID | None = None, q: str | None = None, scope: uuid.UUID | None = None,
 ) -> list[dict]:
     await _close_recovered_winbacks(db, tenant_id)
     query = select(Prospect).where(Prospect.tenant_id == tenant_id)
+    if scope is not None:
+        query = query.where((Prospect.branch_id == scope) | Prospect.branch_id.is_(None))
     if kind:
         query = query.where(Prospect.kind == kind)
     if status_ == "open":
@@ -214,14 +226,17 @@ async def list_prospects(
     return rows
 
 
-async def summary(db: AsyncSession, tenant_id: uuid.UUID) -> dict:
+async def summary(db: AsyncSession, tenant_id: uuid.UUID, scope: uuid.UUID | None = None) -> dict:
     counts = {s: 0 for s in STATUSES}
     by_kind = {"new": 0, "winback": 0}
-    rows = await db.execute(
+    q = (
         select(Prospect.kind, Prospect.status, func.count(Prospect.id))
         .where(Prospect.tenant_id == tenant_id)
         .group_by(Prospect.kind, Prospect.status)
     )
+    if scope is not None:
+        q = q.where((Prospect.branch_id == scope) | Prospect.branch_id.is_(None))
+    rows = await db.execute(q)
     for kind, st, n in rows:
         counts[st] = counts.get(st, 0) + n
         if st in OPEN_STATUSES:
@@ -231,6 +246,8 @@ async def summary(db: AsyncSession, tenant_id: uuid.UUID) -> dict:
     for u in await db.scalars(
         select(User).where(User.tenant_id == tenant_id, User.is_active.is_(True)).order_by(User.full_name)
     ):
+        if scope is not None and u.branch_id not in (None, scope):
+            continue
         if has_capability(u.role, Capability.MANAGE_PROSPECTS) and u.role != "demo":
             assignees.append({"id": u.id, "name": _actor_name(u)})
 
@@ -245,14 +262,32 @@ async def summary(db: AsyncSession, tenant_id: uuid.UUID) -> dict:
 
 # --- create / update ------------------------------------------------------------
 
+async def _prospect_branch(
+    db: AsyncSession, tenant_id: uuid.UUID, scope: uuid.UUID | None, requested: uuid.UUID | None,
+    zone_id: uuid.UUID | None = None,
+) -> uuid.UUID | None:
+    """Explicit branch, else the zone's, else the branch the caller is working in (may be none)."""
+    branch_id = requested
+    if branch_id is None and zone_id is not None:
+        branch_id = await db.scalar(select(Zone.branch_id).where(Zone.id == zone_id, Zone.tenant_id == tenant_id))
+    if branch_id is None:
+        branch_id = scope
+    if branch_id is not None:
+        await get_branch(db, tenant_id, branch_id)
+        if not in_scope(scope, branch_id):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "That branch is outside your access")
+    return branch_id
+
+
 async def create_prospect(db: AsyncSession, tenant_id: uuid.UUID, actor: User, data: dict,
-                          *, source: str = "manual") -> dict:
+                          *, source: str = "manual", scope: uuid.UUID | None = None) -> dict:
     phone = _phone(data.get("phone"))
     await _ensure_new_shop(db, tenant_id, phone)
     await _check_zone(db, tenant_id, data.get("zone_id"))
     await _check_assignee(db, tenant_id, data.get("assigned_to_id"))
+    branch_id = await _prospect_branch(db, tenant_id, scope, data.get("branch_id"), data.get("zone_id"))
     p = Prospect(
-        tenant_id=tenant_id, kind="new", source=source, status="new",
+        tenant_id=tenant_id, branch_id=branch_id, kind="new", source=source, status="new",
         name=data["name"].strip(), contact_name=data.get("contact_name"), phone=phone,
         address=data.get("address"), area=data.get("area"), category=data.get("category"),
         zone_id=data.get("zone_id"), notes=data.get("notes"),
@@ -267,8 +302,10 @@ async def create_prospect(db: AsyncSession, tenant_id: uuid.UUID, actor: User, d
 
 
 async def update_prospect(db: AsyncSession, tenant_id: uuid.UUID, prospect_id: uuid.UUID,
-                          actor: User, data: dict) -> dict:
-    p = await get_prospect(db, tenant_id, prospect_id)
+                          actor: User, data: dict, scope: uuid.UUID | None = None) -> dict:
+    p = await get_prospect(db, tenant_id, prospect_id, scope)
+    if "branch_id" in data:
+        p.branch_id = await _prospect_branch(db, tenant_id, scope, data["branch_id"]) if data["branch_id"] else None
 
     if "phone" in data:
         phone = _phone(data["phone"])
@@ -307,8 +344,9 @@ async def update_prospect(db: AsyncSession, tenant_id: uuid.UUID, prospect_id: u
     return await detail(db, tenant_id, p.id)
 
 
-async def add_note(db: AsyncSession, tenant_id: uuid.UUID, prospect_id: uuid.UUID, actor: User, text: str) -> dict:
-    p = await get_prospect(db, tenant_id, prospect_id)
+async def add_note(db: AsyncSession, tenant_id: uuid.UUID, prospect_id: uuid.UUID, actor: User, text: str,
+                   scope: uuid.UUID | None = None) -> dict:
+    p = await get_prospect(db, tenant_id, prospect_id, scope)
     _log(db, p, "note", text.strip(), actor)
     p.updated_at = _now()
     await db.commit()
@@ -316,8 +354,8 @@ async def add_note(db: AsyncSession, tenant_id: uuid.UUID, prospect_id: uuid.UUI
 
 
 async def mark_contacted(db: AsyncSession, tenant_id: uuid.UUID, prospect_id: uuid.UUID,
-                         actor: User, message: str | None) -> dict:
-    p = await get_prospect(db, tenant_id, prospect_id)
+                         actor: User, message: str | None, scope: uuid.UUID | None = None) -> dict:
+    p = await get_prospect(db, tenant_id, prospect_id, scope)
     if not p.phone:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Add a phone number first")
     p.last_contacted_at = _now()
@@ -331,9 +369,9 @@ async def mark_contacted(db: AsyncSession, tenant_id: uuid.UUID, prospect_id: uu
 
 
 async def convert(db: AsyncSession, tenant_id: uuid.UUID, prospect_id: uuid.UUID, actor: User,
-                  zone_id: uuid.UUID | None = None) -> dict:
+                  zone_id: uuid.UUID | None = None, scope: uuid.UUID | None = None) -> dict:
     """Close as won. A new shop becomes a customer (or is linked to the existing one)."""
-    p = await get_prospect(db, tenant_id, prospect_id)
+    p = await get_prospect(db, tenant_id, prospect_id, scope)
     if p.status == "won":
         raise HTTPException(status.HTTP_409_CONFLICT, "This prospect is already won")
 
@@ -343,10 +381,18 @@ async def convert(db: AsyncSession, tenant_id: uuid.UUID, prospect_id: uuid.UUID
         await _check_zone(db, tenant_id, zone_id)
         customer = await _customer_by_phone(db, tenant_id, p.phone)
         if customer is None:
+            zone = zone_id or p.zone_id
+            branch_id = await _prospect_branch(db, tenant_id, scope, p.branch_id, zone)
+            if branch_id is None:
+                branch_id = (await default_branch(db, tenant_id)).id
+            zone_branch = await db.scalar(select(Zone.branch_id).where(Zone.id == zone)) if zone else None
+            if zone_branch is not None and zone_branch != branch_id:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "That zone belongs to another branch")
             customer = Customer(
-                tenant_id=tenant_id, name=p.name, company=p.name, whatsapp_number=p.phone,
-                address=p.address, zone_id=zone_id or p.zone_id,
+                tenant_id=tenant_id, branch_id=branch_id, name=p.name, company=p.name, whatsapp_number=p.phone,
+                address=p.address, zone_id=zone,
             )
+            p.branch_id = branch_id
             db.add(customer)
             await db.flush()
             note = "Added as a customer"
@@ -364,7 +410,7 @@ async def convert(db: AsyncSession, tenant_id: uuid.UUID, prospect_id: uuid.UUID
 # --- import -----------------------------------------------------------------------
 
 async def import_rows(db: AsyncSession, tenant_id: uuid.UUID, actor: User,
-                      rows: list[dict], problems: list[dict]) -> dict:
+                      rows: list[dict], problems: list[dict], scope: uuid.UUID | None = None) -> dict:
     customer_digits = {
         d for d in (
             phone_digits(n) for n in await db.scalars(
@@ -375,9 +421,9 @@ async def import_rows(db: AsyncSession, tenant_id: uuid.UUID, actor: User,
     prospect_phones = set(await db.scalars(
         select(Prospect.phone).where(Prospect.tenant_id == tenant_id, Prospect.phone.is_not(None))
     ))
-    zones = {name.strip().lower(): zid for zid, name in await db.execute(
-        select(Zone.id, Zone.name).where(Zone.tenant_id == tenant_id)
-    )}
+    zone_rows = list(await db.execute(select(Zone.id, Zone.name, Zone.branch_id).where(Zone.tenant_id == tenant_id)))
+    zones = {name.strip().lower(): zid for zid, name, _ in zone_rows}
+    zone_branch = {zid: bid for zid, _, bid in zone_rows}
 
     skipped = list(problems)
     created = 0
@@ -403,9 +449,12 @@ async def import_rows(db: AsyncSession, tenant_id: uuid.UUID, actor: User,
                 area = r["zone"]
         elif area:
             zone_id = zones.get(area.strip().lower())
+        branch_id = zone_branch.get(zone_id) if zone_id else scope
+        if not in_scope(scope, branch_id):  # a zone of another branch: keep the name only
+            zone_id, area, branch_id = None, area or r["zone"], scope
 
         p = Prospect(
-            tenant_id=tenant_id, kind="new", source="import", status="new", name=r["name"],
+            tenant_id=tenant_id, branch_id=branch_id, kind="new", source="import", status="new", name=r["name"],
             contact_name=r["contact_name"], phone=phone, address=r["address"], area=area,
             category=r["category"], zone_id=zone_id, notes=r["notes"],
             assigned_to_id=actor.id, created_by_id=actor.id,
@@ -454,7 +503,8 @@ async def search_google(db: AsyncSession, tenant_id: uuid.UUID, query: str, lang
     return {"results": results, "next_page_token": page["next_page_token"]}
 
 
-async def add_from_google(db: AsyncSession, tenant_id: uuid.UUID, actor: User, data: dict) -> dict:
+async def add_from_google(db: AsyncSession, tenant_id: uuid.UUID, actor: User, data: dict,
+                          scope: uuid.UUID | None = None) -> dict:
     exists = await db.scalar(select(Prospect.id).where(
         Prospect.tenant_id == tenant_id, Prospect.google_place_id == data["place_id"]
     ))
@@ -463,8 +513,9 @@ async def add_from_google(db: AsyncSession, tenant_id: uuid.UUID, actor: User, d
     phone = _phone(data.get("phone"))
     await _ensure_new_shop(db, tenant_id, phone)
     await _check_zone(db, tenant_id, data.get("zone_id"))
+    branch_id = await _prospect_branch(db, tenant_id, scope, None, data.get("zone_id"))
     p = Prospect(
-        tenant_id=tenant_id, kind="new", source="google", status="new", name=data["name"].strip(),
+        tenant_id=tenant_id, branch_id=branch_id, kind="new", source="google", status="new", name=data["name"].strip(),
         phone=phone, address=data.get("address"), area=data.get("area"), category=data.get("category"),
         zone_id=data.get("zone_id"), google_place_id=data["place_id"], google_maps_uri=data.get("maps_uri"),
         assigned_to_id=actor.id, created_by_id=actor.id,
@@ -498,9 +549,10 @@ async def _close_recovered_winbacks(db: AsyncSession, tenant_id: uuid.UUID) -> i
     return len(rows)
 
 
-async def refresh_winbacks(db: AsyncSession, tenant_id: uuid.UUID, actor: User) -> dict:
+async def refresh_winbacks(db: AsyncSession, tenant_id: uuid.UUID, actor: User,
+                           scope: uuid.UUID | None = None) -> dict:
     closed = await _close_recovered_winbacks(db, tenant_id)
-    drifting = await drifting_customers(db, tenant_id)
+    drifting = await drifting_customers(db, tenant_id, branch_id=scope)
     if not drifting:
         return {"created": 0, "closed": closed}
 
@@ -526,7 +578,7 @@ async def refresh_winbacks(db: AsyncSession, tenant_id: uuid.UUID, actor: User) 
             phone = None
         gap = f"{d.typical_gap_days:g}"
         p = Prospect(
-            tenant_id=tenant_id, kind="winback", source="winback", status="new",
+            tenant_id=tenant_id, branch_id=c.branch_id, kind="winback", source="winback", status="new",
             name=c.name, phone=phone, address=c.address, zone_id=c.zone_id, customer_id=c.id,
             insight=(f"Usually orders every {gap} days; last order {d.days_since_last_order} days ago "
                      f"({d.order_count} orders in total)."),

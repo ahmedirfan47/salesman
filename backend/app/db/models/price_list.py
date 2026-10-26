@@ -25,6 +25,9 @@ class PriceList(UUIDPKMixin, TimestampMixin, Base):
         index=True,
         nullable=False,
     )
+    branch_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("branches.id"), index=True, nullable=False
+    )
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     source_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     file_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
