@@ -5,11 +5,9 @@ import {
   ScrollView,
   Pressable,
   StyleSheet,
-  SafeAreaView,
-  Platform,
-  StatusBar,
   Linking,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { colors, radius, spacing, typography } from "../theme/theme";
 import { SALES_EMAIL, quote } from "../data/plans";
 import { PlanCard } from "../components/PlanCard";
@@ -76,11 +74,8 @@ export function SubscriptionScreen({ onSignIn }: Props) {
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: colors.bg,
-    paddingTop: Platform.OS === "android" ? StatusBar.currentHeight ?? 0 : 0,
-  },
+  // SafeAreaView from react-native-safe-area-context pads for the status bar on both platforms.
+  safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.xl },
   brandRow: { flexDirection: "row", alignItems: "baseline", gap: spacing.sm },
   brand: { ...typography.heading, color: colors.text, letterSpacing: 1.5 },

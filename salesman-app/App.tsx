@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { View, ActivityIndicator, StyleSheet } from "react-native";
 import { StatusBar } from "expo-status-bar";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AuthProvider, useAuth } from "./src/lib/auth-context";
 import { SubscriptionScreen } from "./src/screens/SubscriptionScreen";
 import { LoginScreen } from "./src/screens/LoginScreen";
@@ -43,10 +44,12 @@ function RootNavigator() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <StatusBar style="dark" />
-      <RootNavigator />
-    </AuthProvider>
+    <SafeAreaProvider>
+      <AuthProvider>
+        <StatusBar style="dark" />
+        <RootNavigator />
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }
 

@@ -18,7 +18,7 @@ export const INCLUDED_FEATURES: string[] = [
   "Quotes from your active price list, uploaded from your Excel sheet",
   "Live stock on every quote, with your team approving exceptions",
   "Orders, warehouse print queue and delivery zones with auto-assignment",
-  "Driver and dispatcher apps",
+  "Mobile app for salesmen, drivers and dispatchers",
   "Daily PDF reports and owner analytics (margins, cost prices)",
   "Setup and onboarding by the Stonic team",
 ];

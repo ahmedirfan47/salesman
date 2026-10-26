@@ -16,6 +16,14 @@ export const colors = {
   accentHover: "#2A44B8",
   accentDim: "#EEF1FD",
   success: "#0F9D58",
+  successDim: "#E8F6EE",
+  whatsapp: "#128C4B",
+  warning: "#B45309",
+  warningDim: "#FFF7E6",
+  danger: "#DC2626",
+  dangerDim: "#FEF0F0",
+  violet: "#6D28D9",
+  violetDim: "#F3EEFE",
   white: "#FFFFFF",
 } as const;
 

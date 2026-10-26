@@ -32,14 +32,18 @@ export class UnauthorizedError extends Error {
  * throws UnauthorizedError on 401 (the caller/auth context decides what to
  * do -- e.g. sign the user out), and throws the backend's error detail
  * message on any other non-2xx response.
+ *
+ * Pass `branchId` to narrow a request to one branch (owners and admins see
+ * every branch by default; for branch staff the server ignores it).
  */
-export async function api(path: string, options: RequestInit = {}) {
+export async function api(path: string, options: RequestInit = {}, branchId?: string | null) {
   const token = await getToken();
   const res = await fetch(`${API_BASE}/api/v1${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(branchId ? { "X-Branch-Id": branchId } : {}),
       ...(options.headers || {}),
     },
   });
@@ -50,7 +54,8 @@ export async function api(path: string, options: RequestInit = {}) {
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || `Request failed (${res.status})`);
+    const detail = typeof body.detail === "string" ? body.detail : null;
+    throw new Error(detail || `Request failed (${res.status})`);
   }
   if (res.status === 204) return null;
   return res.json();
@@ -71,6 +76,8 @@ export async function login(email: string, password: string) {
   return data;
 }
 
+export type BillingState = "ok" | "open" | "overdue" | "read_only";
+
 export type Me = {
   id: string;
   email: string;
@@ -78,6 +85,11 @@ export type Me = {
   role: string;
   is_active: boolean;
   capabilities: string[];
+  branch_id?: string | null;
+  branch_name?: string | null;
+  sees_all_branches?: boolean;
+  billing_state?: BillingState;
+  billing_message?: string | null;
 };
 
 export async function fetchMe(): Promise<Me> {

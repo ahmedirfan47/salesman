@@ -1,21 +1,24 @@
-import { View, Text, Pressable, StyleSheet, SafeAreaView } from "react-native";
+import { View, Text, Pressable, StyleSheet } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { colors, spacing, typography } from "../theme/theme";
 import { useAuth } from "../lib/auth-context";
 
 export function Header({ title }: { title: string }) {
   const { me, logout } = useAuth();
+  const branch = me?.branch_name ?? (me?.sees_all_branches ? "All branches" : null);
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView edges={["top"]} style={styles.safe}>
       <View style={styles.row}>
-        <View>
-          <Text style={styles.title}>{title}</Text>
+        <View style={styles.text}>
+          <Text style={styles.title} numberOfLines={1}>{title}</Text>
           {me && (
-            <Text style={styles.subtitle}>
-              {me.full_name || me.email} · <Text style={{ textTransform: "capitalize" }}>{me.role}</Text>
+            <Text style={styles.subtitle} numberOfLines={1}>
+              {me.full_name || me.email} · <Text style={styles.role}>{me.role}</Text>
+              {branch ? ` · ${branch}` : ""}
             </Text>
           )}
         </View>
-        <Pressable onPress={logout} hitSlop={8}>
+        <Pressable onPress={logout} hitSlop={8} accessibilityRole="button">
           <Text style={styles.signOut}>Sign out</Text>
         </Pressable>
       </View>
@@ -29,10 +32,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: spacing.lg,
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm + 4,
   },
+  text: { flex: 1 },
   title: { ...typography.heading, color: colors.text },
-  subtitle: { ...typography.tiny, color: colors.textDim, marginTop: 2, textTransform: "none" },
+  subtitle: { fontSize: 12, color: colors.textDim, marginTop: 2 },
+  role: { textTransform: "capitalize" },
   signOut: { ...typography.caption, color: colors.accent, fontWeight: "600" },
 });

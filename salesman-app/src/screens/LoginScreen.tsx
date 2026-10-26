@@ -5,11 +5,11 @@ import {
   TextInput,
   Pressable,
   StyleSheet,
-  SafeAreaView,
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { colors, radius, spacing, typography } from "../theme/theme";
 import { useAuth } from "../lib/auth-context";
 
