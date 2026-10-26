@@ -10,6 +10,7 @@ SKIP LOCKED so a job is never processed twice concurrently.
 """
 import asyncio
 import logging
+import time
 from collections.abc import Awaitable, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -20,6 +21,9 @@ logger = logging.getLogger("salesman.jobs")
 
 Handler = Callable[[AsyncSession, dict], Awaitable[None]]
 HANDLERS: dict[str, Handler] = {}
+
+# Housekeeping that runs alongside the queue (first run right after start-up).
+SWEEP_EVERY_SECONDS = 3600
 
 
 def handler(kind: str) -> Callable[[Handler], Handler]:
@@ -67,6 +71,16 @@ async def run_once(session_factory: async_sessionmaker) -> bool:
     return True
 
 
+async def sweep(session_factory: async_sessionmaker) -> None:
+    """Periodic work: issue monthly invoices that have come due."""
+    from app.modules.billing.service import issue_due_invoices
+
+    async with session_factory() as db:
+        issued = await issue_due_invoices(db)
+    if issued:
+        logger.info("monthly invoices issued", extra={"ctx_count": issued})
+
+
 async def run_forever(
     session_factory: async_sessionmaker,
     stop: asyncio.Event,
@@ -74,7 +88,14 @@ async def run_forever(
 ) -> None:
     _load_handlers()
     logger.info("job worker started")
+    next_sweep = time.monotonic()
     while not stop.is_set():
+        if time.monotonic() >= next_sweep:
+            next_sweep = time.monotonic() + SWEEP_EVERY_SECONDS
+            try:
+                await sweep(session_factory)
+            except Exception:  # noqa: BLE001 -- retried at the next sweep
+                logger.exception("periodic sweep failed")
         try:
             worked = await run_once(session_factory)
         except Exception:  # noqa: BLE001 -- e.g. the database is briefly unreachable

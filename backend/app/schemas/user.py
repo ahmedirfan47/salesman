@@ -21,6 +21,10 @@ class MeOut(UserOut):
     capabilities: list[str] = []
     branch_name: str | None = None
     sees_all_branches: bool = True
+    # billing: 'ok' | 'open' | 'overdue' | 'read_only', and a notice to show (if any)
+    billing_state: str = "ok"
+    billing_message: str | None = None
+    is_platform_admin: bool = False
 
 
 class UserCreate(BaseModel):

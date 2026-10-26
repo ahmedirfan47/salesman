@@ -89,6 +89,31 @@ export async function uploadFile(path: string, file: File) {
   }
   return res.json();
 }
+/** Download a file from the API (PDFs etc.) with the same auth and branch headers as api(). */
+export async function downloadFile(path: string, filename: string) {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/v1${path}`, {
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...branchHeader() },
+  });
+  if (res.status === 401) {
+    clearToken();
+    if (typeof window !== "undefined") window.location.href = "/login";
+    throw new Error("Unauthorized");
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || `Download failed (${res.status})`);
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export type Me = {
   id: string;
   email: string;
@@ -99,6 +124,10 @@ export type Me = {
   branch_id: string | null;
   branch_name: string | null;
   sees_all_branches: boolean;
+  /** "ok" | "open" | "overdue" | "read_only" */
+  billing_state: string;
+  billing_message: string | null;
+  is_platform_admin: boolean;
 };
 
 export async function fetchMe(): Promise<Me> {

@@ -47,6 +47,17 @@ class Settings(BaseSettings):
     SENTRY_DSN: str = ""
     SENTRY_TRACES_SAMPLE_RATE: float = 0.0
 
+    # Billing. Stonic staff who run the admin console (/platform): comma-separated emails.
+    PLATFORM_ADMIN_EMAILS: str = ""
+    # Printed on every invoice. Separate lines in BILLING_SELLER_ADDRESS and
+    # BILLING_BANK_DETAILS with " | ", e.g. "Bank: Meezan Bank | IBAN: PK00... | SWIFT: MEZNPKKA".
+    BILLING_SELLER_NAME: str = "Stonic"
+    BILLING_SELLER_ADDRESS: str = ""
+    BILLING_SELLER_EMAIL: str = ""
+    BILLING_SELLER_TAX_ID: str = ""
+    BILLING_BANK_DETAILS: str = ""
+    BILLING_INVOICE_PREFIX: str = "INV"
+
     # CORS: comma-separated list of allowed origins (as a plain string to avoid
     # pydantic-settings JSON parsing). Access the parsed list via .cors_origins.
     CORS_ORIGINS: str = "http://localhost:3000"
@@ -66,6 +77,10 @@ class Settings(BaseSettings):
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
+
+    @property
+    def platform_admin_emails(self) -> set[str]:
+        return {e.strip().lower() for e in self.PLATFORM_ADMIN_EMAILS.split(",") if e.strip()}
 
 
 @lru_cache

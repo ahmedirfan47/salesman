@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, Package, Tag, ShoppingCart, AlertTriangle,
   FileBarChart, Printer, MessageSquare, Users, MapPin, ClipboardList,
-  Truck, Contact, CreditCard, LogOut, Menu, X, TrendingUp, Target, Building2,
+  Truck, Contact, CreditCard, LogOut, Menu, X, TrendingUp, Target, Building2, Landmark,
 } from "lucide-react";
 import { clearToken } from "@/lib/api";
 import { useMe, can } from "@/lib/use-me";
@@ -28,14 +28,17 @@ const nav = [
   { href: "/printing", label: "Print Queue", icon: Printer, cap: "view_printing" },
   { href: "/zones", label: "Zones", icon: MapPin, cap: "manage_users" },
   { href: "/branches", label: "Branches", icon: Building2, cap: "manage_users" },
-  { href: "/billing", label: "Billing & Plan", icon: CreditCard, cap: "manage_users" },
+  { href: "/billing", label: "Billing & Plan", icon: CreditCard, cap: "view_billing" },
   { href: "/admin", label: "Team & Access", icon: Users, cap: "manage_users" },
+  // Stonic's own console; shown only to the emails in PLATFORM_ADMIN_EMAILS
+  { href: "/platform", label: "Stonic Console", icon: Landmark, cap: "platform" },
 ];
 
 function NavList({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const { me } = useMe();
-  const visible = nav.filter((n) => n.cap === null || can(me, n.cap));
+  const visible = nav.filter((n) =>
+    n.cap === null || (n.cap === "platform" ? !!me?.is_platform_admin : can(me, n.cap)));
 
   return (
     <nav className="flex-1 space-y-1 px-3">

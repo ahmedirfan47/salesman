@@ -1,14 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, getToken } from "@/lib/api";
+import { api, downloadFile } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Download } from "lucide-react";
 import { TableScroll } from "@/components/table-scroll";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 type Summary = {
   date: string;
@@ -52,21 +50,13 @@ export default function ReportsPage() {
     load(today());
   }, []);
 
+  // goes through downloadFile so the PDF covers the branch selected in the sidebar
   async function downloadPdf() {
-    const res = await fetch(`${API_BASE}/api/v1/reports/daily/pdf?day=${day}`, {
-      headers: { Authorization: `Bearer ${getToken()}` },
-    });
-    if (!res.ok) {
-      setError("Could not download PDF");
-      return;
+    try {
+      await downloadFile(`/reports/daily/pdf?day=${day}`, `report-${day}.pdf`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not download PDF");
     }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `report-${day}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
   }
 
   const t = summary?.totals;

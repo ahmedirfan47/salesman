@@ -7,6 +7,7 @@ import { MeProvider } from "@/lib/use-me";
 import { BranchProvider, useBranches } from "@/lib/branches";
 import Sidebar from "@/components/sidebar";
 import { DemoBanner } from "@/components/demo-banner";
+import { BillingBanner } from "@/components/billing-banner";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -29,6 +30,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <Sidebar />
           <main className="flex-1 overflow-auto p-4 md:p-8">
             <DemoBanner />
+            <BillingBanner />
             <BranchScoped>{children}</BranchScoped>
           </main>
         </div>

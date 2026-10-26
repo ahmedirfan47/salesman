@@ -41,6 +41,14 @@ async def get_current_user(
     # on this function, so no write can slip through a route-level check.
     if user.role == UserRole.DEMO.value and request.method not in _SAFE_METHODS:
         raise HTTPException(status.HTTP_403_FORBIDDEN, DEMO_READ_ONLY_MESSAGE)
+    # Same choke point for accounts with an invoice overdue past the grace
+    # period: everything stays viewable, nothing can be changed. Stonic's
+    # own admins are exempt so they can still mark the invoice paid.
+    if request.method not in _SAFE_METHODS:
+        from app.modules.billing import service as billing
+
+        if not billing.is_platform_admin(user) and await billing.is_read_only(db, user.tenant_id):
+            raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, billing.READ_ONLY_DETAIL)
     return user
 
 

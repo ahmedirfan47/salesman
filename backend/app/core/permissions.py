@@ -30,6 +30,8 @@ class Capability(str, Enum):
     VIEW_ANALYTICS = "view_analytics"
     # Finding new shops, win-back outreach and the prospect pipeline.
     MANAGE_PROSPECTS = "manage_prospects"
+    # The business's own subscription and invoices from Stonic.
+    VIEW_BILLING = "view_billing"
 
 
 _ALL = set(Capability)

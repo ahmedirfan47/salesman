@@ -38,3 +38,15 @@ services:
         sync: false
       - key: JOB_WORKER_ENABLED
         value: "true"
+      - key: PLATFORM_ADMIN_EMAILS
+        sync: false
+      - key: BILLING_SELLER_NAME
+        value: Stonic
+      - key: BILLING_SELLER_ADDRESS
+        sync: false
+      - key: BILLING_SELLER_EMAIL
+        sync: false
+      - key: BILLING_SELLER_TAX_ID
+        sync: false
+      - key: BILLING_BANK_DETAILS
+        sync: false
