@@ -53,11 +53,18 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# Saudi Arabia is UTC+3 all year (no daylight saving), so this is exact for
+# Riyadh even on a machine with no time-zone database.
+_RIYADH = timezone(timedelta(hours=3), "Asia/Riyadh")
+
+
 def _tz(tenant: Tenant | None):
+    """The tenant's time zone for e-invoice dates and times; Riyadh when unknown."""
+    name = (tenant.timezone if tenant else None) or "Asia/Riyadh"
     try:
-        return ZoneInfo(tenant.timezone) if tenant and tenant.timezone else ZoneInfo("Asia/Riyadh")
-    except ZoneInfoNotFoundError:
-        return ZoneInfo("Asia/Riyadh")
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return _RIYADH
 
 
 # ---- the seller and the buyer ---------------------------------------------------------------
