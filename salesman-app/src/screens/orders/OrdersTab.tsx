@@ -30,16 +30,7 @@ export function OrdersTab({ canCreate }: { canCreate: boolean }) {
       {view.name === "new" && (
         <NewOrderScreen
           onBack={back}
-          onCreated={(order) =>
-            setView({
-              name: "detail",
-              id: order.id,
-              notice:
-                order.status === "requires_human_review"
-                  ? `${order.order_number} is waiting for approval: some items are short on stock.`
-                  : `${order.order_number} is confirmed.`,
-            })
-          }
+          onCreated={(order, notice) => setView({ name: "detail", id: order.id, notice })}
         />
       )}
     </View>

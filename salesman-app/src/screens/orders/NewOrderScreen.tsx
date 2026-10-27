@@ -11,11 +11,11 @@ import {
   StyleSheet,
 } from "react-native";
 import { Minus, Plus, Search, Store, UserPlus } from "lucide-react-native";
-import { api } from "../../lib/api";
+import { api, can } from "../../lib/api";
 import { useAuth } from "../../lib/auth-context";
 import { useBack } from "../../lib/use-back";
 import { errorText, money } from "../../lib/format";
-import type { CatalogRow, Customer, Order } from "../../lib/types";
+import type { AccountRow, AccountSettings, CatalogRow, Customer, Order } from "../../lib/types";
 import {
   BackBar, Badge, Button, Card, Chip, Empty, ErrorText, Input, Loading, Notice, SectionTitle, shared,
 } from "../../components/ui";
@@ -31,19 +31,53 @@ function priceOf(row: CatalogRow): number | null {
   return row.unit_price ?? row.price_min;
 }
 
+/** Why the server will hold this order for approval on credit grounds (mirrors its rules). */
+function creditWarnings(acct: AccountRow | undefined, settings: AccountSettings | null, orderTotal: number): string[] {
+  if (!acct || !settings) return [];
+  const out: string[] = [];
+  if (acct.on_hold) out.push("The customer's account is on hold.");
+  if (settings.hold_when_overdue && Number(acct.blocking_overdue) > 0) {
+    out.push(`${money(acct.overdue, acct.currency)} is overdue on this account.`);
+  }
+  if (settings.hold_over_limit && acct.credit_limit !== null) {
+    const withVat = settings.prices_include_vat ? orderTotal : orderTotal * (1 + Number(settings.vat_rate) / 100);
+    const after = Number(acct.exposure) + withVat;
+    if (after > Number(acct.credit_limit)) {
+      out.push(`This order takes the account to ${money(after, acct.currency)}, over its ${money(acct.credit_limit, acct.currency)} limit.`);
+    }
+  }
+  return out;
+}
+
 /**
  * Take an order on the road: pick a customer (or a walk-in), add products
  * priced from that branch's price list with live stock, review, place.
  * Lines over stock still go through -- the server holds the order for a
  * manager's approval, exactly like a WhatsApp order.
  */
-export function NewOrderScreen({ onBack, onCreated }: { onBack: () => void; onCreated: (o: Order) => void }) {
+export function NewOrderScreen({ onBack, onCreated }: {
+  onBack: () => void;
+  /** the created order and a one-line message for the order screen */
+  onCreated: (o: Order, notice: string) => void;
+}) {
   const { me } = useAuth();
   const [step, setStep] = useState<Step>("customer");
   const [buyer, setBuyer] = useState<Buyer | null>(null);
   const [cart, setCart] = useState<Record<string, number>>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [accounts, setAccounts] = useState<Record<string, AccountRow>>({});
+  const [acctSettings, setAcctSettings] = useState<AccountSettings | null>(null);
+  const seesAccounts = can(me, "view_accounts");
+
+  // balances and credit terms, so the salesman knows before placing the order
+  useEffect(() => {
+    if (!seesAccounts) return;
+    api("/accounts")
+      .then((d: { customers: AccountRow[] }) => setAccounts(Object.fromEntries(d.customers.map((a) => [a.customer_id, a]))))
+      .catch(() => setAccounts({}));
+    api("/accounts/settings").then(setAcctSettings).catch(() => setAcctSettings(null));
+  }, [seesAccounts]);
 
   const stepBack = useCallback(() => {
     setError("");
@@ -78,6 +112,8 @@ export function NewOrderScreen({ onBack, onCreated }: { onBack: () => void; onCr
   const total = lines.reduce((n, l) => n + l.qty * l.price, 0);
   const currency = lines[0]?.row.currency ?? catalog?.find((r) => r.currency)?.currency ?? "";
   const short = lines.filter((l) => l.qty > l.row.stock);
+  const account = buyer?.kind === "customer" ? accounts[buyer.customer.id] : undefined;
+  const creditIssues = creditWarnings(account, acctSettings, total);
 
   function setQty(sku: string, qty: number) {
     setCart((c) => {
@@ -104,7 +140,15 @@ export function NewOrderScreen({ onBack, onCreated }: { onBack: () => void; onCr
           };
     try {
       const order: Order = await api("/orders", { method: "POST", body: JSON.stringify(body) });
-      onCreated(order);
+      let notice = `${order.order_number} is confirmed.`;
+      if (order.status === "requires_human_review") {
+        const why = [
+          short.length > 0 ? "some items are short on stock" : null,
+          creditIssues.length > 0 || short.length === 0 ? "the customer's account needs a check" : null,
+        ].filter(Boolean).join(" and ");
+        notice = `${order.order_number} is waiting for a manager's approval: ${why}.`;
+      }
+      onCreated(order, notice);
     } catch (e) {
       setError(errorText(e, "Failed to place the order"));
       setBusy(false);
@@ -118,6 +162,7 @@ export function NewOrderScreen({ onBack, onCreated }: { onBack: () => void; onCr
       <BackBar title={title} onBack={stepBack} />
       {step === "customer" && (
         <CustomerStep
+          accounts={accounts}
           defaultBranch={me?.branch_id ?? null}
           onPick={(b) => {
             if (!buyer || buyerKey(buyer) !== buyerKey(b) || branchOf(buyer) !== branchOf(b)) setCart({});
@@ -154,6 +199,9 @@ export function NewOrderScreen({ onBack, onCreated }: { onBack: () => void; onCr
                 text="Some items are short on stock. The order will wait for a manager's approval before it's confirmed."
               />
             )}
+            {creditIssues.length > 0 && (
+              <Notice tone="danger" text={`${creditIssues.join(" ")} The order will wait for a manager's approval.`} />
+            )}
             <SectionTitle style={styles.firstTitle}>CUSTOMER</SectionTitle>
             <Card>
               <Text style={shared.title}>{buyerName(buyer)}</Text>
@@ -161,6 +209,7 @@ export function NewOrderScreen({ onBack, onCreated }: { onBack: () => void; onCr
                 <Text style={shared.meta}>{buyer.customer.company}</Text>
               ) : null}
               {buyerPhone(buyer) ? <Text style={shared.meta}>{buyerPhone(buyer)}</Text> : null}
+              {account ? <AccountLine account={account} /> : null}
             </Card>
             <SectionTitle>ITEMS</SectionTitle>
             <Card>
@@ -211,7 +260,27 @@ function branchOf(b: Buyer): string | null {
 }
 
 // ---------------------------------------------------------------- customer
-function CustomerStep({ defaultBranch, onPick }: { defaultBranch: string | null; onPick: (b: Buyer) => void }) {
+function AccountLine({ account }: { account: AccountRow }) {
+  const owes = Number(account.balance);
+  const parts = [owes > 0 ? `Owes ${money(account.balance, account.currency)}` : "Nothing owed"];
+  const available = account.available_credit === null ? null : Number(account.available_credit);
+  if (available !== null && available >= 0) parts.push(`${money(available, account.currency)} credit left`);
+  const flags = [
+    account.on_hold ? "On hold" : null,
+    Number(account.overdue) > 0 ? "Overdue" : null,
+    available !== null && available < 0 ? `${money(-available, account.currency)} over limit` : null,
+  ].filter(Boolean) as string[];
+  return (
+    <View style={[shared.inline, styles.accountLine]}>
+      <Text style={shared.dim}>{parts.join(" · ")}</Text>
+      {flags.map((f) => <Badge key={f} label={f} tone="danger" />)}
+    </View>
+  );
+}
+
+function CustomerStep({ accounts, defaultBranch, onPick }: {
+  accounts: Record<string, AccountRow>; defaultBranch: string | null; onPick: (b: Buyer) => void;
+}) {
   const [customers, setCustomers] = useState<Customer[] | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [error, setError] = useState("");
@@ -323,6 +392,7 @@ function CustomerStep({ defaultBranch, onPick }: { defaultBranch: string | null;
                   {[item.company !== item.name ? item.company : null, item.whatsapp_number, item.address].filter(Boolean).join(" · ") ||
                     "No details"}
                 </Text>
+                {accounts[item.id] ? <AccountLine account={accounts[item.id]} /> : null}
               </View>
             </Card>
           )}
@@ -491,4 +561,5 @@ const styles = StyleSheet.create({
   amount: { ...typography.caption, color: colors.text, fontWeight: "500" },
   totalLabel: { ...typography.bodyMedium, color: colors.text, flex: 1 },
   fine: { marginTop: spacing.sm, textAlign: "center" },
+  accountLine: { marginTop: 4 },
 });

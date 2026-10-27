@@ -11,6 +11,7 @@ import { OrderDetailScreen } from "./orders/OrderDetailScreen";
 
 const REASON: Record<string, string> = {
   insufficient_stock: "Short on stock",
+  credit: "Credit check",
 };
 
 /**
@@ -93,6 +94,7 @@ function EscalationCard({
   const [error, setError] = useState("");
   const order = item.context.order_number;
   const shortfalls = item.context.shortfalls ?? [];
+  const credit = item.context.credit ?? [];
 
   async function resolve() {
     if (!decision) return;
@@ -129,6 +131,14 @@ function EscalationCard({
         {order ? <Text style={shared.meta}>{order}</Text> : null}
       </View>
 
+      {credit.length > 0 && (
+        <View style={[styles.box, styles.creditBox]}>
+          {credit.map((c) => (
+            <Text key={c.type} style={styles.creditText}>{c.message}</Text>
+          ))}
+        </View>
+      )}
+
       {shortfalls.length > 0 && (
         <View style={styles.box}>
           {shortfalls.map((s) => (
@@ -141,7 +151,7 @@ function EscalationCard({
           ))}
         </View>
       )}
-      {item.ai_recommendation ? <Text style={styles.rec}>{item.ai_recommendation}</Text> : null}
+      {item.ai_recommendation && credit.length === 0 ? <Text style={styles.rec}>{item.ai_recommendation}</Text> : null}
       <ErrorText text={error} />
 
       {decision === null ? (
@@ -154,7 +164,9 @@ function EscalationCard({
         <View style={[styles.confirm, decision === "reject" && styles.confirmReject]}>
           <Text style={styles.confirmText}>
             {decision === "approve"
-              ? "Confirm the order with the stock available? Short lines are reduced."
+              ? credit.length > 0
+                ? "Supply this order on the customer's account anyway?"
+                : "Confirm the order with the stock available? Short lines are reduced."
               : "Cancel this order? The customer is told on WhatsApp."}
           </Text>
           <Input value={note} onChangeText={setNote} placeholder="Note (optional)" />
@@ -179,6 +191,8 @@ const styles = StyleSheet.create({
   gap: { marginTop: 6 },
   box: { marginTop: spacing.sm + 2, backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.sm + 2, gap: 4 },
   sku: { ...typography.caption, color: colors.text, fontWeight: "600" },
+  creditBox: { backgroundColor: colors.dangerDim },
+  creditText: { ...typography.caption, color: colors.danger, fontWeight: "500" },
   short: { ...typography.caption, color: colors.warning, fontWeight: "500" },
   rec: { ...typography.caption, color: colors.textMuted, marginTop: spacing.sm, lineHeight: 18 },
   actions: { marginTop: spacing.sm + 4 },

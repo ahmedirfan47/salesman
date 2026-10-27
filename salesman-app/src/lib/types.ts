@@ -151,6 +151,7 @@ export type Escalation = {
   context: {
     order_number?: string;
     shortfalls?: { sku: string; requested: number; available: number }[];
+    credit?: { type: "on_hold" | "overdue" | "over_limit"; message: string }[];
     [key: string]: unknown;
   };
   ai_recommendation: string | null;
@@ -159,6 +160,27 @@ export type Escalation = {
   status: string;
   resolution: string | null;
   created_at: string;
+};
+
+/** A customer's account as returned by GET /accounts (amounts as strings). */
+export type AccountRow = {
+  customer_id: string;
+  currency: string;
+  balance: string;
+  exposure: string;
+  credit_limit: string | null;
+  available_credit: string | null;
+  over_limit: boolean;
+  on_hold: boolean;
+  overdue: string;
+  blocking_overdue: string;
+};
+
+export type AccountSettings = {
+  vat_rate: string;
+  prices_include_vat: boolean;
+  hold_over_limit: boolean;
+  hold_when_overdue: boolean;
 };
 
 export type DailySummary = {
