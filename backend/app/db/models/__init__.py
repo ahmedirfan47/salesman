@@ -1,4 +1,7 @@
 """Import all models here so Alembic autogenerate sees them via Base.metadata."""
+from app.db.models.accounts import (
+    AccountEntry, AccountSettings, CustomerPayment, DocumentCounter, PaymentAllocation, SalesInvoice,
+)
 from app.db.models.billing import Invoice, Subscription
 from app.db.models.branch import Branch
 from app.db.models.customer import Customer
@@ -18,6 +21,7 @@ from app.db.models.product_price import ProductPrice
 from app.db.models.prospect import Prospect, ProspectActivity
 from app.db.models.tenant import Tenant
 from app.db.models.user import User
+from app.db.models.zatca import ZatcaDocument, ZatcaUnit
 from app.db.models.zone import DriverZone, Zone
 
 __all__ = [
@@ -25,4 +29,6 @@ __all__ = [
     "Inventory", "InventoryTransaction", "Order", "OrderItem", "OrderEvent",
     "Escalation", "PrintJob", "Conversation", "Message", "Zone", "DriverZone", "Customer", "Job",
     "Prospect", "ProspectActivity", "Subscription", "Invoice",
+    "AccountSettings", "DocumentCounter", "SalesInvoice", "CustomerPayment", "PaymentAllocation", "AccountEntry",
+    "ZatcaUnit", "ZatcaDocument",
 ]

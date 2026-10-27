@@ -3,10 +3,13 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { api, downloadFile } from "@/lib/api";
+import { useMe, can } from "@/lib/use-me";
+import { SalesInvoiceDetail, invoiceBadge, money, day } from "@/lib/accounts";
+import { FLOW_LABEL, edocBadge } from "@/lib/zatca";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Truck, PackageCheck, CheckCircle2, XCircle, Package } from "lucide-react";
+import { ArrowLeft, Truck, PackageCheck, CheckCircle2, XCircle, Package, FileText, Download } from "lucide-react";
 import { OrderProgress } from "@/components/order-progress";
 import { TableScroll } from "@/components/table-scroll";
 import { useBranches } from "@/lib/branches";
@@ -54,11 +57,13 @@ export default function OrderDetailPage() {
   const [order, setOrder] = useState<Order | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [version, setVersion] = useState(0);
 
   function load() {
     api(`/orders/${id}`)
       .then(setOrder)
       .catch((e) => setError(e.message));
+    setVersion((v) => v + 1);
   }
   useEffect(load, [id]);
 
@@ -126,6 +131,8 @@ export default function OrderDetailPage() {
         </div>
       )}
 
+      <InvoiceCard orderId={order.id} status={order.status} version={version} setError={setError} />
+
       {/* items */}
       <Card className="mb-6 overflow-hidden">
         <TableScroll>
@@ -184,5 +191,73 @@ export default function OrderDetailPage() {
         </ol>
       </Card>
     </div>
+  );
+}
+
+const INVOICEABLE = ["confirmed", "preparing", "dispatched", "delivered", "completed"];
+
+/** The order's tax invoice: issued on delivery (or confirmation), or early from here. */
+function InvoiceCard({ orderId, status, version, setError }: {
+  orderId: string; status: string; version: number; setError: (s: string) => void;
+}) {
+  const { me } = useMe();
+  const [inv, setInv] = useState<SalesInvoiceDetail | null | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const visible = can(me, "view_accounts");
+
+  useEffect(() => {
+    if (!visible) return;
+    api(`/accounts/orders/${orderId}/invoice`).then(setInv).catch(() => setInv(null));
+  }, [orderId, version, visible]);
+
+  if (!visible || inv === undefined) return null;
+
+  async function issue() {
+    setBusy(true);
+    setError("");
+    try { setInv(await api(`/accounts/orders/${orderId}/invoice`, { method: "POST" })); }
+    catch (e) { setError(e instanceof Error ? e.message : "Failed"); }
+    finally { setBusy(false); }
+  }
+
+  if (inv === null) {
+    if (!INVOICEABLE.includes(status)) return null;
+    return (
+      <Card className="mb-6 flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <FileText size={16} /> Not invoiced yet. The invoice is issued automatically when the order is delivered.
+        </div>
+        {can(me, "manage_accounts") && (
+          <Button variant="outline" disabled={busy} onClick={issue}>{busy ? "Issuing…" : "Issue invoice now"}</Button>
+        )}
+      </Card>
+    );
+  }
+
+  const badge = invoiceBadge(inv);
+  const e = inv.einvoice ? edocBadge(inv.einvoice.status, inv.einvoice.flow) : null;
+  return (
+    <Card className="mb-6 flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <div className="flex items-center gap-2">
+          <FileText size={16} className="text-slate-400" />
+          <span className="font-mono text-sm font-medium">{inv.number}</span>
+          <span className={`rounded-full px-2 py-0.5 text-xs ${badge.className}`}>{badge.label}</span>
+          {e && inv.einvoice && (
+            <span className={`rounded-full px-2 py-0.5 text-xs ${e.className}`}>ZATCA {FLOW_LABEL[inv.einvoice.flow]} · {e.label}</span>
+          )}
+        </div>
+        <p className="mt-1 text-sm text-slate-500">
+          {money(inv.currency, inv.total)} incl. {money(inv.currency, inv.vat_amount)} VAT · issued {day(inv.issue_date)} · due {day(inv.due_date)}
+          {Number(inv.balance_due) > 0 && Number(inv.balance_due) < Number(inv.total) && <> · {money(inv.currency, inv.balance_due)} left to pay</>}
+        </p>
+      </div>
+      <div className="flex gap-2">
+        {inv.customer_id && <Link href={`/accounts/${inv.customer_id}`}><Button variant="ghost">Account</Button></Link>}
+        <Button variant="outline" onClick={() => downloadFile(`/accounts/invoices/${inv.id}/pdf`, `${inv.number}.pdf`).catch((e) => setError(e.message))}>
+          <Download size={16} /> PDF
+        </Button>
+      </div>
+    </Card>
   );
 }

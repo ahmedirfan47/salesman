@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     SENTRY_DSN: str = ""
     SENTRY_TRACES_SAMPLE_RATE: float = 0.0
 
+    # Encrypts secrets stored in the database (ZATCA private keys and API secrets).
+    # Set it once and never change it; empty falls back to JWT_SECRET.
+    SECRETS_KEY: str = ""
+    # ZATCA e-invoicing: request timeout in seconds
+    ZATCA_TIMEOUT_SECONDS: float = 30.0
+
     # Billing. Stonic staff who run the admin console (/platform): comma-separated emails.
     PLATFORM_ADMIN_EMAILS: str = ""
     # Printed on every invoice. Separate lines in BILLING_SELLER_ADDRESS and

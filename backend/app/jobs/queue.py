@@ -19,6 +19,8 @@ WHATSAPP_INBOUND_TEXT = "whatsapp.inbound_text"
 WHATSAPP_INBOUND_AUDIO = "whatsapp.inbound_audio"
 WHATSAPP_SEND_TEXT = "whatsapp.send_text"
 WHATSAPP_ORDER_UPDATE = "whatsapp.order_update"
+WHATSAPP_SEND_DOCUMENT = "whatsapp.send_document"
+ZATCA_SUBMIT = "zatca.submit"
 
 # A job stuck in 'running' longer than this (e.g. the server restarted
 # mid-job) is considered abandoned and is picked up again.

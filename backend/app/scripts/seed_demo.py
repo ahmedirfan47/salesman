@@ -17,11 +17,14 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import UserRole
 from app.core.security import hash_password
+from app.db.models.accounts import (
+    AccountEntry, AccountSettings, CustomerPayment, DocumentCounter, PaymentAllocation, SalesInvoice,
+)
 from app.db.models.branch import Branch
 from app.db.models.conversation import Conversation
 from app.db.models.customer import Customer
@@ -40,6 +43,7 @@ from app.db.models.product_price import ProductPrice
 from app.db.models.prospect import Prospect, ProspectActivity
 from app.db.models.tenant import Tenant
 from app.db.models.user import User
+from app.db.models.zatca import ZatcaDocument, ZatcaUnit
 from app.db.models.zone import DriverZone, Zone
 
 DEMO_SLUG = "salesman-demo"
@@ -78,6 +82,13 @@ async def _wipe(db: AsyncSession) -> None:
     if tenant is None:
         return
     tid = tenant.id
+    # e-invoices, then customer accounts: they reference orders, customers and each other
+    await db.execute(update(ZatcaDocument).where(ZatcaDocument.tenant_id == tid).values(replaced_by_id=None))
+    for model in (ZatcaDocument, ZatcaUnit):
+        await db.execute(delete(model).where(model.tenant_id == tid))
+    await db.execute(update(SalesInvoice).where(SalesInvoice.tenant_id == tid).values(original_invoice_id=None))
+    for model in (PaymentAllocation, AccountEntry, CustomerPayment, SalesInvoice, DocumentCounter, AccountSettings):
+        await db.execute(delete(model).where(model.tenant_id == tid))
     # children first (some FKs are RESTRICT), then the tenant
     for model in (ProspectActivity, Prospect, Job, Message, Conversation, Escalation, PrintJob,
                   OrderEvent, OrderItem, Order, DriverZone, Customer, InventoryTransaction, Inventory,
@@ -301,6 +312,8 @@ async def seed(db: AsyncSession, email: str, password: str, *, reset: bool = Fal
     await db.commit()
     await _seed_jeddah(db, tid, jeddah.id, products, rng, now, first_number=len(planned) + 3)
     await _seed_prospects(db, tid, rep, zones, now)
+    await _seed_accounts(db, tid, now)
+    await _seed_einvoicing(db, tid, rid, now)
     return tenant
 
 
@@ -422,6 +435,138 @@ async def _seed_prospects(db: AsyncSession, tid, rep: User, zones: dict, now: da
     await db.commit()
     # quiet customers become win-back prospects, exactly as the "Find quiet customers" button does
     await refresh_winbacks(db, tid, rep)
+
+
+# credit limit per customer (None = no limit); the last two are left with overdue invoices
+CREDIT = {
+    "Al Noor Grocery": Decimal("15000"), "Al Waha Market": Decimal("8000"), "Hayat Minimarket": Decimal("15000"),
+    "Green Valley Store": Decimal("8000"), "Al Safa Supermarket": Decimal("9000"), "Riyadh Fresh Mart": None,
+    "Bait Al Khair": Decimal("12000"),
+}
+LATE_PAYERS = {"Al Waha Market", "Al Safa Supermarket"}
+B2B_CUSTOMERS = {
+    "Al Noor Grocery": dict(vat_number="310000000000003", street="King Abdulaziz Rd", building_number="2611",
+                            district="Al Sahafah", city="Riyadh", postal_code="13321"),
+    "Riyadh Fresh Mart": dict(cr_number="1010456789", street="Olaya St", building_number="3150",
+                              district="Al Olaya", city="Riyadh", postal_code="12214"),
+}
+
+
+async def _seed_accounts(db: AsyncSession, tid, now: datetime) -> None:
+    """Invoices for recent deliveries, payments for most of them, and two customers running late."""
+    from app.modules.accounts import service as accounts
+
+    await accounts.update_settings(db, tid, {
+        "seller_name": "Fresh Produce Wholesale Co.", "seller_name_ar": "شركة الخضار والفواكه بالجملة",
+        "seller_vat_number": "300000000000003", "seller_cr_number": "1010000000",
+        "seller_address": "Al Aziziyah wholesale market, Riyadh 14513", "default_payment_terms_days": 30,
+        "seller_street": "Al Aziziyah wholesale market", "seller_building_number": "7421",
+        "seller_district": "Al Aziziyah", "seller_city": "Riyadh", "seller_postal_code": "14513",
+        "invoice_footer": "Bank transfer: Demo Bank | IBAN SA00 0000 0000 0000 0000 0000 | Use the invoice number as reference.",
+    })
+    customers = {c.name: c for c in await db.scalars(select(Customer).where(Customer.tenant_id == tid))}
+    for name, limit in CREDIT.items():
+        if name in customers:
+            customers[name].credit_limit = limit
+    # two business customers with tax registrations get standard (B2B) e-invoices
+    for name, extra in B2B_CUSTOMERS.items():
+        if name in customers:
+            for key, value in extra.items():
+                setattr(customers[name], key, value)
+    await db.commit()
+
+    today = now.date()
+    delivered = list(await db.scalars(
+        select(Order).where(
+            Order.tenant_id == tid, Order.customer_id.is_not(None), Order.status.in_(("delivered", "completed")),
+            Order.created_at >= now - timedelta(days=55),
+        ).order_by(Order.created_at)
+    ))
+    for order in delivered:
+        inv = await accounts.issue_invoice_for_order(db, order)
+        # date the invoice the day after the order, as if it was issued on delivery
+        issued = (order.created_at + timedelta(days=1)).date()
+        inv.issue_date, inv.due_date = issued, issued + timedelta(days=30)
+        inv.issued_at = order.created_at + timedelta(days=1)
+        await db.execute(update(AccountEntry).where(AccountEntry.invoice_id == inv.id).values(entry_date=issued))
+        await db.commit()
+
+    # customers pay what fell due, a few days early; late payers have paid nothing for six weeks
+    for name, c in customers.items():
+        due = list(await db.scalars(
+            select(SalesInvoice).where(SalesInvoice.customer_id == c.id, SalesInvoice.due_date <= today + timedelta(days=3))
+            .order_by(SalesInvoice.due_date)
+        ))
+        if not due:
+            continue
+        if name in LATE_PAYERS:
+            due = [i for i in due if i.issue_date < today - timedelta(days=85)]
+        amount = sum((i.total for i in due), Decimal("0"))
+        if amount > 0:
+            await accounts.record_payment(
+                db, tid, customer_id=c.id, invoice_id=None, amount=amount, method="bank_transfer",
+                reference=f"TRX-{sum(map(ord, name)) * 37 % 90000 + 10000}", paid_on=min(today, max(i.due_date for i in due) - timedelta(days=2)),
+                notes=None, actor_id=None,
+            )
+
+
+async def _seed_einvoicing(db: AsyncSession, tid, branch_id, now: datetime) -> None:
+    """The Riyadh branch connected to ZATCA (with a demo certificate) and its e-invoices.
+
+    Every invoice and credit note is signed for real -- hash chain, QR code and
+    all -- but nothing is sent: the demo marks them cleared or reported, keeps
+    two waiting and one rejected, so every state can be seen.
+    """
+    from app.modules.zatca import crypto
+    from app.modules.zatca import service as zatca
+    from app.modules.zatca import xml as zx
+    from app.core.secret_box import seal
+
+    key = crypto.new_private_key_pem()
+    cert = crypto.demo_certificate(key, "Salesman-Riyadh")
+    unit = ZatcaUnit(
+        tenant_id=tid, branch_id=branch_id, environment="sandbox", status="active", common_name="Salesman-Riyadh",
+        egs_serial=f"1-Salesman|2-2.0|3-{uuid.uuid4()}", organization_unit="Riyadh", invoice_types="1100",
+        location="Al Aziziyah, Riyadh", industry="Wholesale of fruit and vegetables", private_key=seal(key),
+        csr="demo", compliance_results=[{"label": label, "status": "PASS", "errors": [], "warnings": []} for label in (
+            "Standard invoice", "Standard credit note", "Standard debit note",
+            "Simplified invoice", "Simplified credit note", "Simplified debit note")],
+        production_token="demo", production_secret=seal("demo"), certificate=cert,
+        certificate_expires_at=now + timedelta(days=365 * 3), icv=0, last_hash=zx.FIRST_PIH,
+        onboarded_at=now - timedelta(days=60),
+    )
+    db.add(unit)
+    await db.flush()
+    invoices = list(await db.scalars(
+        select(SalesInvoice).where(SalesInvoice.tenant_id == tid, SalesInvoice.branch_id == branch_id,
+                                   SalesInvoice.kind.in_(("invoice", "credit_note")))
+        .order_by(SalesInvoice.issued_at, SalesInvoice.number)
+    ))
+    docs = []
+    for inv in invoices:
+        doc = await zatca.stamp(db, inv)
+        if doc is not None:
+            doc.signed_at = doc.submitted_at = inv.issued_at
+            docs.append(doc)
+    for doc in docs:
+        if doc.status == "queued":
+            doc.status = "cleared" if doc.flow == "standard" else "reported"
+            doc.zatca_status = doc.status.upper()
+            doc.attempts = 1
+            if doc.flow == "standard":
+                doc.cleared_xml = doc.xml
+    # the two newest are still on their way; one older B2B invoice was rejected
+    for doc in docs[-2:]:
+        doc.status, doc.zatca_status, doc.attempts, doc.submitted_at = "queued", None, 0, None
+    rejected = next((d for d in reversed(docs[:-2]) if d.flow == "standard" and d.kind == "invoice"), None)
+    if rejected is not None:
+        rejected.status, rejected.zatca_status, rejected.cleared_xml = "rejected", "NOT_CLEARED", None
+        rejected.errors = [{"code": "BR-KSA-63", "category": "KSA",
+                            "message": "If the buyer country code is SA, the buyer's street, building number, "
+                                       "postal code, city and district are mandatory."}]
+    # demo documents are never sent anywhere
+    await db.execute(delete(Job).where(Job.tenant_id == tid, Job.kind == "zatca.submit"))
+    await db.commit()
 
 
 async def _main(email: str, password: str, reset: bool) -> None:
