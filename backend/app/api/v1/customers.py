@@ -24,7 +24,7 @@ async def create_customer(data: CustomerCreate, db: DBSession, user: CurrentUser
     return await service.create_customer(
         db, user.tenant_id, name=data.name, company=data.company,
         whatsapp_number=data.whatsapp_number, address=data.address, zone_id=data.zone_id,
-        branch_id=data.branch_id, scope=scope,
+        branch_id=data.branch_id, vat_number=data.vat_number, scope=scope,
     )
 
 

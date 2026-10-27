@@ -46,7 +46,7 @@ async def _zone(db: AsyncSession, tenant_id: uuid.UUID, zone_id: uuid.UUID) -> Z
 async def create_customer(
     db: AsyncSession, tenant_id: uuid.UUID, *, name: str, company: str | None,
     whatsapp_number: str | None, address: str | None, zone_id: uuid.UUID | None,
-    branch_id: uuid.UUID | None = None, scope: uuid.UUID | None = None,
+    branch_id: uuid.UUID | None = None, vat_number: str | None = None, scope: uuid.UUID | None = None,
 ) -> Customer:
     if whatsapp_number:
         dup = await find_by_whatsapp(db, tenant_id, whatsapp_number)
@@ -60,6 +60,7 @@ async def create_customer(
     c = Customer(
         tenant_id=tenant_id, branch_id=branch, name=name, company=company,
         whatsapp_number=whatsapp_number, address=address, zone_id=zone_id,
+        vat_number=(vat_number or "").strip() or None,
     )
     db.add(c)
     await db.commit()

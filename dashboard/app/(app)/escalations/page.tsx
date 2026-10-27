@@ -14,6 +14,11 @@ type Escalation = {
   created_at: string;
 };
 
+const REASON_LABEL: Record<string, string> = {
+  insufficient_stock: "Short on stock",
+  credit: "Credit check",
+};
+
 export default function EscalationsPage() {
   const [items, setItems] = useState<Escalation[]>([]);
   const [error, setError] = useState("");
@@ -59,7 +64,7 @@ export default function EscalationsPage() {
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
-                    {e.reason_type.replace(/_/g, " ")}
+                    {REASON_LABEL[e.reason_type] ?? e.reason_type.replace(/_/g, " ")}
                   </span>
                   {e.customer_name && <span className="text-sm font-medium">{e.customer_name}</span>}
                 </div>

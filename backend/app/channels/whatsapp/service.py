@@ -6,6 +6,7 @@ and stock and the order is placed at that branch.
 
 - verify_signature: confirm a POST really came from Meta (HMAC on the raw body)
 - send_text / send_template: message a customer from a branch's number
+- send_document: upload a PDF (statement, invoice) and send it to a customer
 - process_incoming: route an inbound text message to its branch, run the AI
   agent, persist the conversation, and queue the reply for sending.
 - process_incoming_audio: download a voice note, transcribe it, then reuse the
@@ -73,6 +74,33 @@ async def _post_message(branch: Branch, payload: dict) -> dict:
 async def send_text(branch: Branch, to_number: str, body: str) -> dict:
     """Send a WhatsApp text message from a branch's number."""
     return await _post_message(branch, {"to": to_number, "type": "text", "text": {"body": body[:4096]}})
+
+
+async def upload_media(branch: Branch, content: bytes, filename: str, mime: str = "application/pdf") -> str | None:
+    """Upload a file to Meta and return its media id (used once to send it)."""
+    if not branch.whatsapp_phone_number_id or not branch.whatsapp_access_token:
+        return None
+    url = f"{settings.WHATSAPP_API_BASE}/{branch.whatsapp_phone_number_id}/media"
+    headers = {"Authorization": f"Bearer {branch.whatsapp_access_token}"}
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.post(
+            url, headers=headers,
+            data={"messaging_product": "whatsapp", "type": mime},
+            files={"file": (filename, content, mime)},
+        )
+        resp.raise_for_status()
+        return resp.json().get("id")
+
+
+async def send_document(branch: Branch, to_number: str, content: bytes, filename: str, caption: str | None = None) -> dict:
+    """Send a PDF to a customer from a branch's number."""
+    media_id = await upload_media(branch, content, filename)
+    if not media_id:
+        return {"skipped": "branch WhatsApp not configured"}
+    document = {"id": media_id, "filename": filename[:240]}
+    if caption:
+        document["caption"] = caption[:1024]
+    return await _post_message(branch, {"to": to_number, "type": "document", "document": document})
 
 
 async def send_template(branch: Branch, to_number: str, name: str, language: str, params: list[str]) -> dict:

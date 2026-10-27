@@ -13,6 +13,11 @@ create_order():
 Hard rule: an order is NEVER confirmed for a quantity beyond available stock
 without explicit human approval.
 
+Credit control works the same way: an order for a customer who is on hold,
+has an invoice overdue past the grace period, or would go over their credit
+limit is held with a 'credit' escalation, even when everything is in stock.
+Invoices are issued by the accounts module (on confirmation or delivery).
+
 Every order belongs to one branch: it is priced from that branch's price list
 and takes stock from that branch's inventory.
 """
@@ -34,6 +39,7 @@ from app.db.models.order_event import OrderEvent
 from app.db.models.order_item import OrderItem
 from app.db.models.product import Product
 from app.db.models.product_price import ProductPrice
+from app.modules.accounts import service as accounts
 from app.modules.notifications import service as notifications
 from app.modules.printing import service as printing_service
 from app.schemas.order import OrderCreate
@@ -151,10 +157,18 @@ async def create_order(
                 {"sku": product.sku, "requested": line.quantity, "available": available}
             )
 
+    # 1b. credit control for known customers
+    credit_reasons: list[dict] = []
+    if customer is not None:
+        order_amount = sum(
+            (Decimal(str(e["price"].unit_price)) * e["quantity"] for e in resolved), Decimal("0")
+        )
+        credit_reasons = await accounts.credit_check(db, tenant_id, customer, order_amount)
+
     order_number = await _generate_order_number(db, tenant_id)
 
-    # 2a. any shortfall -> hold for human review, create escalation, touch no stock
-    if shortfalls:
+    # 2a. any shortfall or credit problem -> hold for human review, create escalation, touch no stock
+    if shortfalls or credit_reasons:
         order = Order(
             tenant_id=tenant_id,
             branch_id=branch_id,
@@ -191,17 +205,26 @@ async def create_order(
             )
         order.total_amount = total
 
-        rec = "; ".join(
-            f"{s['sku']}: requested {s['requested']}, only {s['available']} available"
-            for s in shortfalls
+        parts = []
+        if credit_reasons:
+            parts.append("Credit: " + "; ".join(r["message"] for r in credit_reasons))
+        if shortfalls:
+            rec = "; ".join(
+                f"{s['sku']}: requested {s['requested']}, only {s['available']} available"
+                for s in shortfalls
+            )
+            parts.append(f"Insufficient stock -> {rec}")
+        advice = (
+            "Approve to supply on credit anyway (partial where stock is short) or reject."
+            if credit_reasons else "Approve partial/backorder or reject."
         )
         db.add(
             Escalation(
                 tenant_id=tenant_id,
                 branch_id=branch_id,
-                reason_type="insufficient_stock",
-                context={"order_number": order_number, "shortfalls": shortfalls},
-                ai_recommendation=f"Insufficient stock -> {rec}. Approve partial/backorder or reject.",
+                reason_type="credit" if credit_reasons else "insufficient_stock",
+                context={"order_number": order_number, "shortfalls": shortfalls, "credit": credit_reasons},
+                ai_recommendation=f"{'. '.join(parts)}. {advice}",
                 order_id=order.id,
                 customer_name=cust_name,
                 whatsapp_number=cust_whatsapp,
@@ -288,6 +311,7 @@ async def create_order(
     # otherwise it stays 'confirmed' for the dispatcher.
     from app.modules.zones import service as zones_service
     await zones_service.auto_assign_order(db, tenant_id, order, actor_id=actor_id)
+    await accounts.after_order_event(db, order, "confirmed", actor_id=actor_id)
 
     return order
 
@@ -436,6 +460,9 @@ async def resolve_escalation(
         await notifications.queue_order_update(
             db, order, "approved" if approve else "rejected", {"shorted": shorted}
         )
+        if approve:
+            await accounts.after_order_event(db, order, "confirmed", actor_id=actor_id)
+            await db.refresh(esc)
     return esc
 
 
@@ -501,6 +528,9 @@ async def transition_order(
     await db.refresh(order)
     if to_status in notifications.STATUS_EVENTS:
         await notifications.queue_order_update(db, order, to_status)
+    if to_status in ("delivered", "cancelled"):
+        await accounts.after_order_event(db, order, to_status, actor_id=actor_id)
+        await db.refresh(order)
     return order
 
 

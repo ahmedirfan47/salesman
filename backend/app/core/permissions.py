@@ -32,6 +32,10 @@ class Capability(str, Enum):
     MANAGE_PROSPECTS = "manage_prospects"
     # The business's own subscription and invoices from Stonic.
     VIEW_BILLING = "view_billing"
+    # Customer accounts: balances, invoices, statements and credit status.
+    VIEW_ACCOUNTS = "view_accounts"
+    # Record payments, issue credit notes, set credit limits and terms.
+    MANAGE_ACCOUNTS = "manage_accounts"
 
 
 _ALL = set(Capability)
@@ -47,6 +51,7 @@ ROLE_CAPABILITIES: dict[UserRole, set[Capability]] = {
         Capability.VIEW_CONVERSATIONS,
         Capability.VIEW_REPORTS,
         Capability.MANAGE_PROSPECTS,
+        Capability.VIEW_ACCOUNTS,
     },
     UserRole.DISPATCHER: {
         Capability.VIEW_ORDERS,
@@ -69,6 +74,7 @@ ROLE_CAPABILITIES: dict[UserRole, set[Capability]] = {
     UserRole.VIEWER: {
         Capability.VIEW_ORDERS,
         Capability.VIEW_REPORTS,
+        Capability.VIEW_ACCOUNTS,
     },
 }
 
