@@ -45,7 +45,7 @@ def _phone(raw: str | None) -> str | None:
     try:
         return normalize_phone(raw, settings.PROSPECT_DEFAULT_COUNTRY_CODE)
     except InvalidPhone:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"'{raw}' is not a valid phone number")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"'{raw}' is not a valid phone number")
 
 
 def _log(db: AsyncSession, p: Prospect, kind: str, body: str | None, actor: User | None) -> None:
@@ -96,7 +96,7 @@ async def _check_zone(db: AsyncSession, tenant_id: uuid.UUID, zone_id: uuid.UUID
     if zone_id is None:
         return
     if await db.scalar(select(Zone.id).where(Zone.id == zone_id, Zone.tenant_id == tenant_id)) is None:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Unknown zone")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unknown zone")
 
 
 async def _check_assignee(db: AsyncSession, tenant_id: uuid.UUID, user_id: uuid.UUID | None) -> None:
@@ -104,7 +104,7 @@ async def _check_assignee(db: AsyncSession, tenant_id: uuid.UUID, user_id: uuid.
         return
     u = await db.scalar(select(User).where(User.id == user_id, User.tenant_id == tenant_id, User.is_active.is_(True)))
     if u is None or not has_capability(u.role, Capability.MANAGE_PROSPECTS):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "That person can't be assigned prospects")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "That person can't be assigned prospects")
 
 
 async def _ensure_new_shop(db: AsyncSession, tenant_id: uuid.UUID, phone: str | None,
@@ -323,13 +323,13 @@ async def update_prospect(db: AsyncSession, tenant_id: uuid.UUID, prospect_id: u
         if f in data:
             value = data[f]
             if f == "name" and not (value or "").strip():
-                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Name can't be empty")
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Name can't be empty")
             setattr(p, f, value.strip() if isinstance(value, str) else value)
 
     new_status = data.get("status")
     if new_status and new_status != p.status:
         if new_status == "won":
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Use 'Mark as won' to close a prospect as won")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Use 'Mark as won' to close a prospect as won")
         if p.status == "won":
             raise HTTPException(status.HTTP_409_CONFLICT, "This prospect is already won")
         old = p.status
@@ -357,7 +357,7 @@ async def mark_contacted(db: AsyncSession, tenant_id: uuid.UUID, prospect_id: uu
                          actor: User, message: str | None, scope: uuid.UUID | None = None) -> dict:
     p = await get_prospect(db, tenant_id, prospect_id, scope)
     if not p.phone:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Add a phone number first")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Add a phone number first")
     p.last_contacted_at = _now()
     if p.status == "new":
         p.status = "contacted"
@@ -387,7 +387,7 @@ async def convert(db: AsyncSession, tenant_id: uuid.UUID, prospect_id: uuid.UUID
                 branch_id = (await default_branch(db, tenant_id)).id
             zone_branch = await db.scalar(select(Zone.branch_id).where(Zone.id == zone)) if zone else None
             if zone_branch is not None and zone_branch != branch_id:
-                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "That zone belongs to another branch")
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "That zone belongs to another branch")
             customer = Customer(
                 tenant_id=tenant_id, branch_id=branch_id, name=p.name, company=p.name, whatsapp_number=p.phone,
                 address=p.address, zone_id=zone,

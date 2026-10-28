@@ -67,7 +67,7 @@ async def set_driver_zones(
     if len(zones) != len(set(zone_ids)):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Zone not found")
     if driver.branch_id is not None and any(z.branch_id != driver.branch_id for z in zones):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "A driver can only cover zones of their own branch")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "A driver can only cover zones of their own branch")
     # clear existing
     existing = list(await db.scalars(select(DriverZone).where(DriverZone.driver_id == driver_id)))
     for dz in existing:
@@ -129,7 +129,7 @@ async def assign_order(
         if not zone:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Zone not found")
         if zone.branch_id != order.branch_id:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "That zone belongs to another branch")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "That zone belongs to another branch")
         order.zone_id = zone_id
     if driver_id is not None:
         driver = await db.scalar(
@@ -138,7 +138,7 @@ async def assign_order(
         if not driver:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Driver not found")
         if driver.branch_id is not None and driver.branch_id != order.branch_id:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "That driver works for another branch")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "That driver works for another branch")
         order.assigned_driver_id = driver_id
     await db.commit()
     await db.refresh(order)

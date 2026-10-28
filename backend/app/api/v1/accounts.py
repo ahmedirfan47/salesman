@@ -11,6 +11,7 @@ from app.core.permissions import Capability
 from app.db.models.order import Order
 from app.modules.accounts import pdf as account_pdf
 from app.modules.accounts import service
+from app.modules.integrations import hooks as erp
 from app.modules.zatca import service as zatca
 from app.schemas.accounts import (
     AccountRow, AccountSettingsIn, AccountSettingsOut, AccountsOut, AllocationOut, CreditNoteIn, CreditTermsIn,
@@ -109,6 +110,8 @@ async def update_credit(
         else:
             setattr(customer, key, value)
     await db.commit()
+    if "vat_number" in data.model_fields_set:
+        await erp.queue_safely(db, user.tenant_id, "customer", customer.id)
     await db.refresh(customer)
     summary = await service.account_summary(db, user.tenant_id, customer)
     await db.commit()
@@ -124,6 +127,7 @@ async def update_tax_details(
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(customer, key, (value or "").strip() or None)
     await db.commit()
+    await erp.queue_safely(db, user.tenant_id, "customer", customer.id)
     await db.refresh(customer)
     return TaxDetailsOut.model_validate(customer)
 

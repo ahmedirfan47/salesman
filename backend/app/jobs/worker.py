@@ -24,6 +24,8 @@ HANDLERS: dict[str, Handler] = {}
 
 # Housekeeping that runs alongside the queue (first run right after start-up).
 SWEEP_EVERY_SECONDS = 3600
+# How often to check which ERP connections are due a price-and-stock fetch.
+ERP_TICK_SECONDS = 60
 
 
 def handler(kind: str) -> Callable[[Handler], Handler]:
@@ -81,6 +83,14 @@ async def sweep(session_factory: async_sessionmaker) -> None:
         logger.info("monthly invoices issued", extra={"ctx_count": issued})
 
 
+async def erp_tick(session_factory: async_sessionmaker) -> None:
+    """Queue the ERP price-and-stock fetches that are due."""
+    from app.modules.integrations.service import schedule_pulls
+
+    async with session_factory() as db:
+        await schedule_pulls(db)
+
+
 async def run_forever(
     session_factory: async_sessionmaker,
     stop: asyncio.Event,
@@ -89,7 +99,14 @@ async def run_forever(
     _load_handlers()
     logger.info("job worker started")
     next_sweep = time.monotonic()
+    next_erp_tick = time.monotonic()
     while not stop.is_set():
+        if time.monotonic() >= next_erp_tick:
+            next_erp_tick = time.monotonic() + ERP_TICK_SECONDS
+            try:
+                await erp_tick(session_factory)
+            except Exception:  # noqa: BLE001 -- retried at the next tick
+                logger.exception("ERP scheduling failed")
         if time.monotonic() >= next_sweep:
             next_sweep = time.monotonic() + SWEEP_EVERY_SECONDS
             try:

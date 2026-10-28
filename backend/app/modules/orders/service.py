@@ -40,6 +40,7 @@ from app.db.models.order_item import OrderItem
 from app.db.models.product import Product
 from app.db.models.product_price import ProductPrice
 from app.modules.accounts import service as accounts
+from app.modules.integrations import hooks as erp
 from app.modules.notifications import service as notifications
 from app.modules.printing import service as printing_service
 from app.schemas.order import OrderCreate
@@ -312,6 +313,7 @@ async def create_order(
     from app.modules.zones import service as zones_service
     await zones_service.auto_assign_order(db, tenant_id, order, actor_id=actor_id)
     await accounts.after_order_event(db, order, "confirmed", actor_id=actor_id)
+    await erp.queue_safely(db, tenant_id, "order.confirmed", order.id)
 
     return order
 
@@ -462,6 +464,7 @@ async def resolve_escalation(
         )
         if approve:
             await accounts.after_order_event(db, order, "confirmed", actor_id=actor_id)
+            await erp.queue_safely(db, tenant_id, "order.confirmed", order.id)
             await db.refresh(esc)
     return esc
 
@@ -530,6 +533,7 @@ async def transition_order(
         await notifications.queue_order_update(db, order, to_status)
     if to_status in ("delivered", "cancelled"):
         await accounts.after_order_event(db, order, to_status, actor_id=actor_id)
+        await erp.queue_safely(db, tenant_id, f"order.{to_status}", order.id)
         await db.refresh(order)
     return order
 

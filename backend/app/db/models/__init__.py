@@ -7,6 +7,7 @@ from app.db.models.branch import Branch
 from app.db.models.customer import Customer
 from app.db.models.conversation import Conversation
 from app.db.models.escalation import Escalation
+from app.db.models.integration import IntegrationConnection, IntegrationEvent, IntegrationLink
 from app.db.models.inventory import Inventory
 from app.db.models.inventory_transaction import InventoryTransaction
 from app.db.models.job import Job
@@ -31,4 +32,5 @@ __all__ = [
     "Prospect", "ProspectActivity", "Subscription", "Invoice",
     "AccountSettings", "DocumentCounter", "SalesInvoice", "CustomerPayment", "PaymentAllocation", "AccountEntry",
     "ZatcaUnit", "ZatcaDocument",
+    "IntegrationConnection", "IntegrationLink", "IntegrationEvent",
 ]

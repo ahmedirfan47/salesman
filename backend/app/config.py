@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     SECRETS_KEY: str = ""
     # ZATCA e-invoicing: request timeout in seconds
     ZATCA_TIMEOUT_SECONDS: float = 30.0
+    # ERP connections: allow addresses on private networks (localhost, 10.x, 192.168.x).
+    # Only for running Odoo on your own machine while developing; keep it off in production.
+    ERP_ALLOW_PRIVATE_URLS: bool = False
 
     # Billing. Stonic staff who run the admin console (/platform): comma-separated emails.
     PLATFORM_ADMIN_EMAILS: str = ""

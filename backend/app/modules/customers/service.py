@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.branches import get_branch, in_scope, resolve_branch
 from app.db.models.customer import Customer
 from app.db.models.zone import Zone
+from app.modules.integrations import hooks as erp
 
 
 async def list_customers(db: AsyncSession, tenant_id: uuid.UUID, scope: uuid.UUID | None = None) -> list[Customer]:
@@ -56,7 +57,7 @@ async def create_customer(
     # the zone decides the branch unless one is given explicitly
     branch = await resolve_branch(db, tenant_id, scope, branch_id or (zone.branch_id if zone else None))
     if zone and zone.branch_id != branch:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "That zone belongs to another branch")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "That zone belongs to another branch")
     c = Customer(
         tenant_id=tenant_id, branch_id=branch, name=name, company=company,
         whatsapp_number=whatsapp_number, address=address, zone_id=zone_id,
@@ -83,11 +84,12 @@ async def update_customer(
         if zone_id is not None:
             zone = await _zone(db, tenant_id, zone_id)
             if zone.branch_id != fields.get("branch_id", c.branch_id):
-                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "That zone belongs to another branch")
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "That zone belongs to another branch")
         c.zone_id = zone_id
     for k, v in fields.items():
         if v is not None:
             setattr(c, k, v)
     await db.commit()
+    await erp.queue_safely(db, tenant_id, "customer", c.id)
     await db.refresh(c)
     return c

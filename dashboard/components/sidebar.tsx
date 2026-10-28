@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, Package, Tag, ShoppingCart, AlertTriangle,
   FileBarChart, Printer, MessageSquare, Users, MapPin, ClipboardList,
-  Truck, Contact, CreditCard, LogOut, Menu, X, TrendingUp, Target, Building2, Landmark, Wallet,
+  Truck, Contact, CreditCard, LogOut, Menu, X, TrendingUp, Target, Building2, Landmark, Wallet, Cable,
 } from "lucide-react";
 import { clearToken } from "@/lib/api";
 import { useMe, can } from "@/lib/use-me";
@@ -29,6 +29,7 @@ const nav = [
   { href: "/printing", label: "Print Queue", icon: Printer, cap: "view_printing" },
   { href: "/zones", label: "Zones", icon: MapPin, cap: "manage_users" },
   { href: "/branches", label: "Branches", icon: Building2, cap: "manage_users" },
+  { href: "/integrations", label: "Integrations", icon: Cable, cap: "manage_integrations" },
   { href: "/billing", label: "Billing & Plan", icon: CreditCard, cap: "view_billing" },
   { href: "/admin", label: "Team & Access", icon: Users, cap: "manage_users" },
   // Stonic's own console; shown only to the emails in PLATFORM_ADMIN_EMAILS

@@ -84,7 +84,7 @@ async def import_prospects(db: DBSession, user: CurrentUser, scope: BranchScope,
             content, file.filename or "upload.xlsx", settings.PROSPECT_DEFAULT_COUNTRY_CODE
         )
     except ProspectFileError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
     return ImportResultOut.model_validate(await service.import_rows(db, user.tenant_id, user, rows, problems, scope))
 
 

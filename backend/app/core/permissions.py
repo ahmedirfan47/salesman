@@ -36,6 +36,8 @@ class Capability(str, Enum):
     VIEW_ACCOUNTS = "view_accounts"
     # Record payments, issue credit notes, set credit limits and terms.
     MANAGE_ACCOUNTS = "manage_accounts"
+    # Connect an ERP or accounting system (Odoo, ...) and control what syncs.
+    MANAGE_INTEGRATIONS = "manage_integrations"
 
 
 _ALL = set(Capability)

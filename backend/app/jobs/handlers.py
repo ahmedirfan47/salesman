@@ -8,6 +8,8 @@ from app.channels.whatsapp import service as whatsapp
 from app.core.branches import default_branch
 from app.db.models.branch import Branch
 from app.jobs.queue import (
+    ERP_PULL,
+    ERP_PUSH,
     WHATSAPP_INBOUND_AUDIO,
     WHATSAPP_INBOUND_TEXT,
     WHATSAPP_ORDER_UPDATE,
@@ -17,6 +19,7 @@ from app.jobs.queue import (
 )
 from app.jobs.worker import handler
 from app.modules.accounts import documents as account_documents
+from app.modules.integrations import service as integrations
 from app.modules.notifications import service as notifications
 from app.modules.zatca import service as zatca
 
@@ -74,3 +77,17 @@ async def zatca_submit(db: AsyncSession, p: dict) -> None:
     """Clear or report one e-invoice. ZATCA being unreachable raises, so the queue retries it."""
     result = await zatca.submit_document(db, uuid.UUID(p["document_id"]))
     logger.info("zatca submission", extra={"ctx_document_id": p["document_id"], "ctx_result": result})
+
+
+@handler(ERP_PUSH)
+async def erp_push(db: AsyncSession, p: dict) -> None:
+    """Send one order, invoice, payment or customer to the connected ERP. Raises only to be retried."""
+    result = await integrations.run_push(db, p)
+    logger.info("erp push", extra={"ctx_action": p.get("action"), "ctx_record_id": p.get("id"), "ctx_result": result})
+
+
+@handler(ERP_PULL)
+async def erp_pull(db: AsyncSession, p: dict) -> None:
+    """Refresh products, prices and stock from the connected ERP."""
+    result = await integrations.run_pull(db, p)
+    logger.info("erp pull", extra={"ctx_connection_id": p.get("connection_id"), "ctx_result": result})

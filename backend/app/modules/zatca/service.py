@@ -166,9 +166,9 @@ async def prepare_unit(
     from app.modules.accounts import service as accounts
 
     if environment not in ENVIRONMENTS:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Unknown ZATCA environment")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unknown ZATCA environment")
     if invoice_types not in ("1100", "1000", "0100"):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invoice types must be 1100, 1000 or 0100")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Invoice types must be 1100, 1000 or 0100")
     branch = await db.scalar(select(Branch).where(Branch.id == branch_id, Branch.tenant_id == tenant_id))
     if branch is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Branch not found")
@@ -176,9 +176,9 @@ async def prepare_unit(
     settings = await accounts.get_settings(db, tenant_id)
     problems = seller_problems(settings, tenant)
     if problems:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, " ".join(problems))
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, " ".join(problems))
     if not location.strip() or not industry.strip():
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Location and industry are required")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Location and industry are required")
 
     unit = await unit_for_branch(db, branch.id, lock=True)
     if unit is not None and unit.status == "active":
@@ -244,7 +244,7 @@ async def onboard(db: AsyncSession, tenant_id: uuid.UUID, unit_id: uuid.UUID, ot
     settings = await accounts.get_settings(db, tenant_id)
     env = unit.environment
 
-    def fail(message: str, http: int = status.HTTP_422_UNPROCESSABLE_ENTITY):
+    def fail(message: str, http: int = status.HTTP_422_UNPROCESSABLE_CONTENT):
         unit.status, unit.last_error = "failed", message
         return HTTPException(http, message)
 
@@ -252,7 +252,7 @@ async def onboard(db: AsyncSession, tenant_id: uuid.UUID, unit_id: uuid.UUID, ot
         # 1. compliance certificate (needs the portal's OTP)
         if not unit.compliance_token:
             if not (otp or "").strip():
-                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Enter the OTP from the Fatoora portal")
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Enter the OTP from the Fatoora portal")
             code, data = await client.compliance_csid(env, crypto.csr_for_api(unit.csr), otp.strip())
             if code != 200 or not data.get("binarySecurityToken"):
                 errors, _ = client.messages(data)

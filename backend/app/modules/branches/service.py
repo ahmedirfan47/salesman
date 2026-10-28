@@ -104,7 +104,7 @@ async def update_branch(db: AsyncSession, tenant_id: uuid.UUID, branch_id: uuid.
         await _make_default(db, tenant_id, branch)
     if data.get("is_active") is False:
         if branch.is_default:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
                                 "The default branch can't be deactivated. Make another branch the default first.")
         branch.is_active = False
     elif data.get("is_active") is True:

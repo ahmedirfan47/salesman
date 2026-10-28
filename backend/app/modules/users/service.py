@@ -15,10 +15,10 @@ def _valid_role(role: str) -> str:
     try:
         value = UserRole(role).value
     except ValueError:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Invalid role '{role}'")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Invalid role '{role}'")
     if value == UserRole.DEMO.value:
         # Demo accounts are created only by `python -m app.scripts.seed_demo`.
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "The demo role can't be assigned here")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "The demo role can't be assigned here")
     return value
 
 
@@ -46,7 +46,7 @@ async def create_user(
 ) -> User:
     role = _valid_role(role)
     if len(password) < 8:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Password must be at least 8 characters")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Password must be at least 8 characters")
     exists = await db.scalar(select(User).where(User.email == email))
     if exists:
         raise HTTPException(status.HTTP_409_CONFLICT, "A user with that email already exists")

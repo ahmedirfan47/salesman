@@ -96,5 +96,5 @@ async def resolve_branch(
             return active[0]
         if not active:
             return (await default_branch(db, tenant_id)).id
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Choose a branch first")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Choose a branch first")
     return (await default_branch(db, tenant_id)).id

@@ -17,6 +17,8 @@ The rules, in one place:
   invoice overdue past the grace period, or would go over their credit limit.
 - Once a branch is connected to ZATCA, each invoice and credit note is signed
   as an e-invoice in the same transaction that issues it (app.modules.zatca).
+- With an ERP connected, invoices, credit notes and payments are queued for it
+  in the same transaction (app.modules.integrations).
 """
 import logging
 import uuid
@@ -37,6 +39,7 @@ from app.db.models.accounts import (
 from app.db.models.customer import Customer
 from app.db.models.order import Order
 from app.db.models.tenant import Tenant
+from app.modules.integrations import hooks as erp
 from app.modules.zatca import service as zatca
 
 logger = logging.getLogger("salesman.accounts")
@@ -92,7 +95,7 @@ async def get_settings(db: AsyncSession, tenant_id: uuid.UUID) -> AccountSetting
 async def update_settings(db: AsyncSession, tenant_id: uuid.UUID, data: dict) -> AccountSettings:
     row = await get_settings(db, tenant_id)
     if "invoice_on" in data and data["invoice_on"] not in (None, "delivered", "confirmed"):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invoices are issued on 'confirmed' or 'delivered'")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Invoices are issued on 'confirmed' or 'delivered'")
     for key, value in data.items():
         if key in ("default_credit_limit",):
             setattr(row, key, value)  # None clears the default limit
@@ -296,6 +299,7 @@ async def issue_invoice_for_order(
         await db.flush()
         await apply_unallocated(db, order.tenant_id, customer.id)
     await zatca.stamp_safely(db, inv)
+    await erp.queue(db, order.tenant_id, "invoice", inv.id)
     if commit:
         await db.commit()
         await db.refresh(inv)
@@ -334,7 +338,7 @@ async def add_opening_balance(
     """What a customer already owed before the business moved to Salesman."""
     amount = money(amount)
     if amount <= 0:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
                             "An opening balance must be more than zero. Record money the customer is owed as a payment.")
     customer = await get_customer(db, tenant_id, customer_id, scope, lock=True)
     settings = await get_settings(db, tenant_id)
@@ -370,16 +374,16 @@ async def issue_credit_note(
     inv = await get_invoice(db, tenant_id, invoice_id, scope)
     inv = await db.scalar(select(SalesInvoice).where(SalesInvoice.id == inv.id).with_for_update())
     if inv.kind == "credit_note":
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "A credit note can't be credited")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "A credit note can't be credited")
     creditable = money(inv.total) - money(inv.amount_credited)
     if creditable <= 0:
         raise HTTPException(status.HTTP_409_CONFLICT, "This invoice has already been credited in full")
     full = amount is None
     amount = creditable if full else money(amount)
     if amount <= 0:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "The credit amount must be more than zero")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "The credit amount must be more than zero")
     if amount > creditable:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
                             f"At most {inv.currency} {creditable:,.2f} can still be credited on {inv.number}")
 
     total = money(inv.total)
@@ -418,6 +422,7 @@ async def issue_credit_note(
         await db.flush()
         await apply_unallocated(db, tenant_id, inv.customer_id)
     await zatca.stamp_safely(db, note)
+    await erp.queue(db, tenant_id, "invoice", note.id)
     await db.commit()
     await db.refresh(note)
     return note
@@ -500,21 +505,21 @@ async def record_payment(
 ) -> CustomerPayment:
     amount = money(amount)
     if amount <= 0:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "The amount must be more than zero")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "The amount must be more than zero")
     if method not in PAYMENT_METHODS:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Payment method must be one of: {', '.join(PAYMENT_METHODS)}")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Payment method must be one of: {', '.join(PAYMENT_METHODS)}")
     if customer_id is None and invoice_id is None:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Choose a customer or an invoice")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Choose a customer or an invoice")
 
     inv = await get_invoice(db, tenant_id, invoice_id, scope) if invoice_id else None
     if inv is not None:
         if inv.kind == "credit_note":
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "A payment can't be recorded against a credit note")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "A payment can't be recorded against a credit note")
         if customer_id is not None and inv.customer_id != customer_id:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "That invoice belongs to another customer")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "That invoice belongs to another customer")
         customer_id = inv.customer_id
         if customer_id is None and amount > inv.balance_due:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
                                 f"This walk-in invoice only has {inv.currency} {inv.balance_due:,.2f} left to pay")
     customer = await get_customer(db, tenant_id, customer_id, scope, lock=True) if customer_id else None
 
@@ -522,7 +527,7 @@ async def record_payment(
     today = await _today(db, tenant_id)
     paid_on = paid_on or today
     if paid_on > today:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "A payment can't be dated in the future")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "A payment can't be dated in the future")
     payment = CustomerPayment(
         tenant_id=tenant_id, branch_id=customer.branch_id if customer else inv.branch_id,
         customer_id=customer.id if customer else None, number=await next_number(db, tenant_id, "payment"),
@@ -541,6 +546,7 @@ async def record_payment(
     if customer is not None:
         await db.flush()
         await apply_unallocated(db, tenant_id, customer.id)
+    await erp.queue(db, tenant_id, "payment", payment.id)
     await db.commit()
     await db.refresh(payment)
     return payment
@@ -573,6 +579,7 @@ async def void_payment(
                       debit=payment.amount, entry_date=await _today(db, tenant_id)))
         await db.flush()
         await apply_unallocated(db, tenant_id, payment.customer_id)
+    await erp.queue(db, tenant_id, "payment.void", payment.id)
     await db.commit()
     await db.refresh(payment)
     return payment
@@ -812,7 +819,7 @@ async def statement(
     end = end or today
     start = start or (end - timedelta(days=90))
     if start > end:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "The start date must be before the end date")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "The start date must be before the end date")
     opening = money(await db.scalar(
         select(func.coalesce(func.sum(AccountEntry.debit - AccountEntry.credit), 0)).where(
             AccountEntry.tenant_id == tenant_id, AccountEntry.customer_id == customer.id, AccountEntry.entry_date < start,

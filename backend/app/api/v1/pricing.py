@@ -82,7 +82,7 @@ async def upload_price_sheet(
     try:
         lines = parse_price_sheet(content)
     except ExcelParseError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
 
     data = PriceListCreate(source_filename=filename, lines=lines)
     return await service.create_price_list(

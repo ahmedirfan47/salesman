@@ -9,6 +9,7 @@ description = "Salesman - AI Sales & Order Management Agent (backend)"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.110",
+    "starlette>=0.48",            # HTTP_422_UNPROCESSABLE_CONTENT
     "uvicorn[standard]>=0.29",
     "sqlalchemy>=2.0",
     "asyncpg>=0.29",

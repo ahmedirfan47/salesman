@@ -131,7 +131,7 @@ async def upsert_subscription(db: AsyncSession, tenant_id: uuid.UUID, data: dict
     if sub.currency:
         sub.currency = sub.currency.upper()
     if sub.status not in ("active", "paused", "cancelled"):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Status must be active, paused or cancelled")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Status must be active, paused or cancelled")
     if sub.status == "cancelled" and old_status != "cancelled":
         sub.cancelled_on = on
     elif sub.status != "cancelled":
@@ -158,7 +158,7 @@ def _price_lines(lines: list[dict]) -> tuple[list[dict], Decimal]:
         qty = Decimal(str(line["quantity"]))
         unit = money(line["unit_amount"])
         if qty <= 0:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Each line needs a quantity above zero")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Each line needs a quantity above zero")
         amount = money(qty * unit)
         subtotal += amount
         out.append({
@@ -168,7 +168,7 @@ def _price_lines(lines: list[dict]) -> tuple[list[dict], Decimal]:
             "amount": str(amount),
         })
     if not out:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "An invoice needs at least one line")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "An invoice needs at least one line")
     return out, money(subtotal)
 
 
@@ -301,7 +301,7 @@ async def issue_custom_invoice(
     tenant = await get_tenant(db, tenant_id)
     sub = await get_subscription(db, tenant_id)
     if due_on is not None and due_on < on:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "The due date can't be in the past")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "The due date can't be in the past")
     invoice = await _issue(db, tenant, sub, kind="other", lines=lines, issued_on=on, due_on=due_on, notes=notes)
     await db.commit()
     await db.refresh(invoice)

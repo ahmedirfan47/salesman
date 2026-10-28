@@ -21,6 +21,8 @@ WHATSAPP_SEND_TEXT = "whatsapp.send_text"
 WHATSAPP_ORDER_UPDATE = "whatsapp.order_update"
 WHATSAPP_SEND_DOCUMENT = "whatsapp.send_document"
 ZATCA_SUBMIT = "zatca.submit"
+ERP_PUSH = "erp.push"
+ERP_PULL = "erp.pull"
 
 # A job stuck in 'running' longer than this (e.g. the server restarted
 # mid-job) is considered abandoned and is picked up again.
