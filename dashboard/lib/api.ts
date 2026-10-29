@@ -30,6 +30,9 @@ function branchHeader(): Record<string, string> {
   const id = getBranchId();
   return id ? { "X-Branch-Id": id } : {};
 }
+// Tells the server this request comes from the web dashboard (the app sends "mobile"),
+// so the Stonic Console can show web and app usage separately.
+const CLIENT_HEADER = { "X-Client": "web" };
 
 export async function api(path: string, options: RequestInit = {}) {
   const token = getToken();
@@ -39,6 +42,7 @@ export async function api(path: string, options: RequestInit = {}) {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...branchHeader(),
+      ...CLIENT_HEADER,
       ...(options.headers || {}),
     },
   });
@@ -58,7 +62,7 @@ export async function api(path: string, options: RequestInit = {}) {
 export async function login(email: string, password: string) {
   const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...CLIENT_HEADER },
     body: JSON.stringify({ email, password }),
   });
   if (!res.ok) {
@@ -75,7 +79,7 @@ export async function uploadFile(path: string, file: File) {
   form.append("file", file);
   const res = await fetch(`${API_BASE}/api/v1${path}`, {
     method: "POST",
-    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...branchHeader() }, // no Content-Type: browser sets multipart boundary
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...branchHeader(), ...CLIENT_HEADER }, // no Content-Type: browser sets multipart boundary
     body: form,
   });
   if (res.status === 401) {
@@ -93,7 +97,7 @@ export async function uploadFile(path: string, file: File) {
 export async function downloadFile(path: string, filename: string) {
   const token = getToken();
   const res = await fetch(`${API_BASE}/api/v1${path}`, {
-    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...branchHeader() },
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...branchHeader(), ...CLIENT_HEADER },
   });
   if (res.status === 401) {
     clearToken();
@@ -136,7 +140,7 @@ export async function fetchMe(): Promise<Me> {
 export async function register(tenant_name: string, email: string, password: string) {
   const res = await fetch(`${API_BASE}/api/v1/auth/register`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...CLIENT_HEADER },
     body: JSON.stringify({ tenant_name, email, password }),
   });
   if (!res.ok) {
@@ -146,4 +150,29 @@ export async function register(tenant_name: string, email: string, password: str
   const data = await res.json();
   setToken(data.access_token);
   return data;
+}
+
+/** Whether sign-in and sign-up are open, and the banner (set in the Stonic Console). No sign-in needed. */
+export type SiteStatus = {
+  sign_in_enabled: boolean;
+  sign_up_enabled: boolean;
+  read_only: boolean;
+  closed_message: string | null;
+  read_only_message: string | null;
+  banner_text: string | null;
+  banner_tone: "info" | "warning";
+};
+
+const SITE_OPEN: SiteStatus = {
+  sign_in_enabled: true, sign_up_enabled: true, read_only: false, closed_message: null,
+  read_only_message: null, banner_text: null, banner_tone: "info",
+};
+
+export async function getSite(): Promise<SiteStatus> {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/site`, { cache: "no-store" });
+    return res.ok ? await res.json() : SITE_OPEN;
+  } catch {
+    return SITE_OPEN; // server unreachable: show the normal pages
+  }
 }

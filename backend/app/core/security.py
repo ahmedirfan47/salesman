@@ -25,6 +25,7 @@ def _create_token(
     role: str,
     token_type: str,
     expires_delta: timedelta,
+    version: int = 0,
 ) -> str:
     now = datetime.now(timezone.utc)
     payload = {
@@ -35,21 +36,23 @@ def _create_token(
         "iat": now,
         "exp": now + expires_delta,
         "jti": str(uuid.uuid4()),
+        # the user's token_version: raising it on the user ends every older session
+        "ver": version,
     }
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
-def create_access_token(subject: uuid.UUID, tenant_id: uuid.UUID, role: str) -> str:
+def create_access_token(subject: uuid.UUID, tenant_id: uuid.UUID, role: str, version: int = 0) -> str:
     return _create_token(
         subject, tenant_id, role, "access",
-        timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+        timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES), version,
     )
 
 
-def create_refresh_token(subject: uuid.UUID, tenant_id: uuid.UUID, role: str) -> str:
+def create_refresh_token(subject: uuid.UUID, tenant_id: uuid.UUID, role: str, version: int = 0) -> str:
     return _create_token(
         subject, tenant_id, role, "refresh",
-        timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+        timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS), version,
     )
 
 

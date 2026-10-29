@@ -15,6 +15,7 @@ from app.db.models.message import Message
 from app.db.models.order import Order
 from app.db.models.order_event import OrderEvent
 from app.db.models.order_item import OrderItem
+from app.db.models.platform import AdminAuditLog, LoginEvent, PlatformSettings, UserActivity
 from app.db.models.price_list import PriceList
 from app.db.models.print_job import PrintJob
 from app.db.models.product import Product
@@ -33,4 +34,5 @@ __all__ = [
     "AccountSettings", "DocumentCounter", "SalesInvoice", "CustomerPayment", "PaymentAllocation", "AccountEntry",
     "ZatcaUnit", "ZatcaDocument",
     "IntegrationConnection", "IntegrationLink", "IntegrationEvent",
+    "PlatformSettings", "UserActivity", "LoginEvent", "AdminAuditLog",
 ]

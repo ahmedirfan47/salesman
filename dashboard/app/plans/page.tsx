@@ -1,12 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { PlanCard } from "@/components/plan-card";
+import { getSite } from "@/lib/api";
 import { SALES_EMAIL } from "@/lib/plans";
 
 export default function PublicPlansPage() {
   const [branches, setBranches] = useState(1);
+  // "Create an account" only while sign-up is open (Stonic Console > Switches)
+  const [signUpOpen, setSignUpOpen] = useState(true);
+  useEffect(() => {
+    getSite().then((s) => setSignUpOpen(s.sign_up_enabled));
+  }, []);
   const subject = encodeURIComponent(`Salesman pilot — ${branches} branch${branches === 1 ? "" : "es"}`);
 
   return (
@@ -32,8 +38,8 @@ export default function PublicPlansPage() {
             onBranchesChange={setBranches}
             primaryLabel="Talk to us about a pilot"
             primaryHref={`mailto:${SALES_EMAIL}?subject=${subject}`}
-            secondaryLabel="Create an account"
-            secondaryHref="/signup"
+            secondaryLabel={signUpOpen ? "Create an account" : undefined}
+            secondaryHref={signUpOpen ? "/signup" : undefined}
           />
         </div>
       </div>

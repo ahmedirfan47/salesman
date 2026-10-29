@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { register } from "@/lib/api";
+import { Lock } from "lucide-react";
+import { getSite, register, type SiteStatus } from "@/lib/api";
+import { SALES_EMAIL } from "@/lib/plans";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -15,6 +17,11 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [site, setSite] = useState<SiteStatus | null>(null);
+
+  useEffect(() => {
+    getSite().then(setSite);
+  }, []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -34,15 +41,45 @@ export default function SignupPage() {
     }
   }
 
+  const brand = (
+    <div className="mb-6 text-center">
+      <div className="text-2xl font-bold tracking-tight">
+        Salesman<span className="text-[var(--primary)]">.</span>
+      </div>
+      <p className="mt-1 text-sm text-slate-500">Create your company&apos;s account</p>
+    </div>
+  );
+
+  if (site && !site.sign_up_enabled) {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-4">
+        <Card className="w-full max-w-sm p-8">
+          {brand}
+          <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            <Lock size={16} className="mt-0.5 shrink-0" />
+            <span>{site.closed_message ?? "New sign-ups are closed right now."}</span>
+          </div>
+          <a
+            href={`mailto:${SALES_EMAIL}?subject=${encodeURIComponent("Salesman account")}`}
+            className="mt-5 block w-full rounded-lg bg-[var(--primary)] py-2 text-center text-sm font-medium text-white hover:opacity-90"
+          >
+            Talk to us about an account
+          </a>
+          <p className="mt-6 text-center text-sm text-slate-500">
+            Already have an account?{" "}
+            <Link href="/login" className="font-medium text-[var(--primary)] hover:underline">
+              Sign in
+            </Link>
+          </p>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
       <Card className="w-full max-w-sm p-8">
-        <div className="mb-6 text-center">
-          <div className="text-2xl font-bold tracking-tight">
-            Salesman<span className="text-[var(--primary)]">.</span>
-          </div>
-          <p className="mt-1 text-sm text-slate-500">Create your company's account</p>
-        </div>
+        {brand}
         <form onSubmit={onSubmit} className="space-y-4">
           <div>
             <label className="mb-1 block text-sm font-medium">Company name</label>

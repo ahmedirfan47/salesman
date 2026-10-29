@@ -9,6 +9,9 @@ const API_BASE =
   process.env.EXPO_PUBLIC_API_URL || "https://salesman-backend-m5gx.onrender.com";
 
 const TOKEN_KEY = "salesman_token";
+// Tells the server this request comes from the mobile app (the web dashboard sends "web"),
+// so the Stonic Console can show app and web usage separately.
+const CLIENT_HEADER = { "X-Client": "mobile" };
 
 export async function getToken(): Promise<string | null> {
   return AsyncStorage.getItem(TOKEN_KEY);
@@ -44,6 +47,7 @@ export async function api(path: string, options: RequestInit = {}, branchId?: st
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(branchId ? { "X-Branch-Id": branchId } : {}),
+      ...CLIENT_HEADER,
       ...(options.headers || {}),
     },
   });
@@ -64,7 +68,7 @@ export async function api(path: string, options: RequestInit = {}, branchId?: st
 export async function login(email: string, password: string) {
   const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...CLIENT_HEADER },
     body: JSON.stringify({ email, password }),
   });
   if (!res.ok) {

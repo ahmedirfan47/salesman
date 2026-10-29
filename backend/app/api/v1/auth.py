@@ -1,7 +1,7 @@
 import uuid
 
 import jwt
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 
 from app.core.deps import CurrentUser, DBSession
 from app.core.security import (
@@ -11,6 +11,7 @@ from app.core.security import (
 )
 from app.db.models.user import User
 from app.modules.auth import service
+from app.modules.platform import access
 from app.schemas.auth import (
     LoginRequest,
     RefreshRequest,
@@ -24,8 +25,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 def _tokens(user: User) -> TokenResponse:
     return TokenResponse(
-        access_token=create_access_token(user.id, user.tenant_id, user.role),
-        refresh_token=create_refresh_token(user.id, user.tenant_id, user.role),
+        access_token=create_access_token(user.id, user.tenant_id, user.role, user.token_version),
+        refresh_token=create_refresh_token(user.id, user.tenant_id, user.role, user.token_version),
     )
 
 
@@ -36,8 +37,8 @@ async def register(data: RegisterRequest, db: DBSession) -> TokenResponse:
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(data: LoginRequest, db: DBSession) -> TokenResponse:
-    user = await service.authenticate(db, data.email, data.password)
+async def login(data: LoginRequest, db: DBSession, request: Request) -> TokenResponse:
+    user = await service.authenticate(db, data.email, data.password, request)
     return _tokens(user)
 
 
@@ -51,8 +52,13 @@ async def refresh(data: RefreshRequest, db: DBSession) -> TokenResponse:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token type")
 
     user = await db.get(User, uuid.UUID(payload["sub"]))
-    if not user or not user.is_active:
+    if not user:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found or inactive")
+    if payload.get("ver", 0) != user.token_version:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, access.SESSION_ENDED)
+    problem = await access.blocked(db, user)
+    if problem is not None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, problem[1])
     return _tokens(user)
 
 

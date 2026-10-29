@@ -24,6 +24,11 @@ TEST_DATABASE_URL = os.getenv(
 
 @pytest_asyncio.fixture
 async def db():
+    # per-process caches must not leak from one test's database into the next
+    from app.modules.platform import activity, site
+
+    site.invalidate()
+    activity.forget()
     engine = create_async_engine(TEST_DATABASE_URL)
 
     async with engine.begin() as conn:
