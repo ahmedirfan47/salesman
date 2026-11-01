@@ -25,6 +25,7 @@ from app.db.models.tenant import Tenant
 from app.db.models.user import User
 from app.db.session import SessionLocal
 from app.main import app
+from app.modules.platform import access
 
 DEMO_SLUG = "salesman-demo"
 DEFAULT_OUT = Path(__file__).resolve().parents[3] / "dashboard" / "public" / "preview" / "data.json"
@@ -54,8 +55,15 @@ async def _demo_user() -> User:
         return user
 
 
+async def _switches_ignored(db, user):
+    """Only a switched-off account is refused here: closing sign-in in the Stonic Console
+    keeps people out of the site, not this export, which runs in-process and only reads."""
+    return ("inactive", access.INACTIVE) if not user.is_active else None
+
+
 async def export(out: Path) -> None:
     logging.disable(logging.INFO)  # keep the request log quiet
+    access.blocked = _switches_ignored
     user = await _demo_user()
     token = create_access_token(user.id, user.tenant_id, user.role, user.token_version)
     responses: dict[str, dict] = {}
@@ -73,6 +81,12 @@ async def export(out: Path) -> None:
             responses[path] = {"status": r.status_code, "body": body}
             return body if r.status_code < 400 else None
 
+        me = await client.get("/auth/me")
+        if me.status_code >= 400:
+            detail = (me.json() if me.content else {}).get("detail", me.text)
+            raise SystemExit(f"The demo account was refused ({me.status_code}): {detail}\n"
+                             "Run `python -m app.scripts.seed_demo ... --reset` and try again.")
+
         for path in STATIC:
             await get(path)
 
@@ -85,20 +99,25 @@ async def export(out: Path) -> None:
         for status in PROSPECT_STATUSES:
             await get(f"/prospects?status={status}")
 
+        def rows(path: str) -> list:
+            body = responses[path]["body"]
+            return body if responses[path]["status"] < 400 and isinstance(body, list) else []
+
         # rows people can open
-        for o in responses["/orders"]["body"] or []:
+        for o in rows("/orders"):
             await get(f"/orders/{o['id']}")
             await get(f"/accounts/orders/{o['id']}/invoice")
-        for c in responses["/conversations"]["body"] or []:
+        for c in rows("/conversations"):
             await get(f"/conversations/{c['id']}/messages")
-        for p in responses["/prospects"]["body"] or []:
+        for p in rows("/prospects"):
             await get(f"/prospects/{p['id']}")
-        for u in responses["/users"]["body"] or []:
+        for u in rows("/users"):
             if u["role"] == "driver":
                 await get(f"/zones/drivers/{u['id']}/zones")
-        for z in responses["/zones"]["body"] or []:
+        for z in rows("/zones"):
             await get(f"/zones/suggest-driver/{z['id']}")
-        accounts = (responses["/accounts"]["body"] or {}).get("customers", [])
+        accounts_body = responses["/accounts"]["body"]
+        accounts = accounts_body.get("customers", []) if isinstance(accounts_body, dict) else []
         start, end = today - timedelta(days=90), today
         for a in accounts:
             cid = a.get("customer_id") or a.get("id")
