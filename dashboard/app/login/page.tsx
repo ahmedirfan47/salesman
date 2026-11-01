@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Lock } from "lucide-react";
-import { getSite, login, PREVIEW, type SiteStatus } from "@/lib/api";
+import { getSite, login, type SiteStatus } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -18,12 +18,8 @@ export default function LoginPage() {
   const [site, setSite] = useState<SiteStatus | null>(null);
 
   useEffect(() => {
-    if (PREVIEW) {
-      router.replace("/overview"); // preview mode: no sign-in
-      return;
-    }
     getSite().then(setSite);
-  }, [router]);
+  }, []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();

@@ -1,14 +1,14 @@
-"""Save the demo business's screens as sample data for the dashboard's preview mode.
+"""Save the demo business's screens as sample data for the dashboard's "See the demo" button.
 
     python -m app.scripts.seed_demo --email demo@stonic.site --password "demo-pass-123"
     python -m app.scripts.export_preview
 
 Run both from backend/ against your local database. The second command signs in
 as the read-only demo account (in-process, no server needed), reads every screen
-the dashboard shows and writes dashboard/public/preview/data.json. With
-NEXT_PUBLIC_PREVIEW_MODE=on the dashboard opens straight into those screens
-without a sign-in and without a backend. Run it again any time to refresh the
-sample data (for example after `seed_demo --reset`, which moves the dates up).
+the dashboard shows and writes dashboard/public/preview/data.json. The "See the
+demo" button on the plans page opens those screens without a sign-in and without
+a backend. Run it again any time to refresh the sample data (for example after
+`seed_demo --reset`, which moves the dates up), then commit data.json.
 """
 import argparse
 import asyncio

@@ -8,7 +8,7 @@ import {
   FileBarChart, Printer, MessageSquare, Users, MapPin, ClipboardList,
   Truck, Contact, CreditCard, LogOut, Menu, X, TrendingUp, Target, Building2, Wallet, Cable,
 } from "lucide-react";
-import { clearToken } from "@/lib/api";
+import { clearToken, isDemo } from "@/lib/api";
 import { useMe, can } from "@/lib/use-me";
 import { BranchSwitcher } from "@/components/branch-switcher";
 
@@ -66,10 +66,12 @@ export default function Sidebar() {
   const { me } = useMe();
   const [open, setOpen] = useState(false);
 
+  const demo = isDemo();
   function logout() {
     clearToken();
-    router.replace("/login");
+    router.replace(demo ? "/plans" : "/login");
   }
+  const logoutLabel = demo ? "Exit demo" : "Sign out";
 
   const brand = (
     <div className="text-lg font-bold tracking-tight text-slate-900">
@@ -109,7 +111,7 @@ export default function Sidebar() {
           onClick={logout}
           className="m-3 flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-gray-100"
         >
-          <LogOut size={18} /> Sign out
+          <LogOut size={18} /> {logoutLabel}
         </button>
       </aside>
 
@@ -135,7 +137,7 @@ export default function Sidebar() {
               onClick={() => { setOpen(false); logout(); }}
               className="m-3 flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-gray-100"
             >
-              <LogOut size={18} /> Sign out
+              <LogOut size={18} /> {logoutLabel}
             </button>
           </div>
         </div>

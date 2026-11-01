@@ -1,12 +1,28 @@
 //dashboard\lib\api.ts
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-// ---- Preview mode -------------------------------------------------------------------------
-// NEXT_PUBLIC_PREVIEW_MODE=on (set in Vercel, then redeploy): no sign-in and no backend.
-// Everyone lands in the dashboard as the read-only demo business, with the sample data in
-// public/preview/data.json (made by `python -m app.scripts.export_preview`). Changes are off.
-export const PREVIEW = process.env.NEXT_PUBLIC_PREVIEW_MODE === "on";
-export const PREVIEW_MESSAGE = "This is a preview with sample data. Changes are switched off.";
+// ---- Demo ----------------------------------------------------------------------------------
+// "See the demo" on the plans page opens the dashboard as the read-only demo business, using the
+// sample data in public/preview/data.json (made by `python -m app.scripts.export_preview`).
+// No sign-in and no backend needed; changes are off. "Exit demo" in the sidebar ends it.
+// NEXT_PUBLIC_DEMO=off (set in Vercel, then redeploy) hides the demo.
+export const DEMO_AVAILABLE = process.env.NEXT_PUBLIC_DEMO !== "off";
+export const DEMO_MESSAGE = "This is a demo with sample data. Changes are switched off.";
+const DEMO_KEY = "salesman_demo";
+
+export function isDemo(): boolean {
+  if (!DEMO_AVAILABLE || typeof window === "undefined") return false;
+  try { return localStorage.getItem(DEMO_KEY) === "1"; } catch { return false; }
+}
+export function startDemo() {
+  try {
+    localStorage.setItem(DEMO_KEY, "1");
+    localStorage.removeItem(BRANCH_KEY);
+  } catch { /* storage unavailable: the demo can't start */ }
+}
+export function endDemo() {
+  try { localStorage.removeItem(DEMO_KEY); } catch { /* storage unavailable */ }
+}
 
 type Snapshot = Record<string, { status: number; body: unknown }>;
 let snapshot: Promise<Snapshot> | null = null;
@@ -20,28 +36,30 @@ function loadSnapshot(): Promise<Snapshot> {
 }
 
 /** The saved answer for a GET: the exact address, else the same page with other filters or dates. */
-async function previewGet(path: string): Promise<unknown> {
+async function demoGet(path: string): Promise<unknown> {
   const data = await loadSnapshot();
   const clean = path.endsWith("?") ? path.slice(0, -1) : path;
   const base = clean.split("?")[0];
   const hit = data[clean] ?? data[base] ?? Object.entries(data).find(([k]) => k.split("?")[0] === base)?.[1];
-  if (!hit) throw new Error("This part isn't available in the preview.");
+  if (!hit) throw new Error("This part isn't available in the demo.");
   if (hit.status >= 400) {
     const detail = (hit.body as { detail?: unknown } | null)?.detail;
-    throw new Error(typeof detail === "string" ? detail : "This part isn't available in the preview.");
+    throw new Error(typeof detail === "string" ? detail : "This part isn't available in the demo.");
   }
   return structuredClone(hit.body);
 }
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
-  if (PREVIEW) return "preview"; // everyone is "signed in" as the demo business
+  if (isDemo()) return "demo";
   return localStorage.getItem("salesman_token");
 }
 export function setToken(t: string) {
+  endDemo(); // a real sign-in ends the demo
   localStorage.setItem("salesman_token", t);
 }
 export function clearToken() {
+  endDemo();
   localStorage.removeItem("salesman_token");
   localStorage.removeItem(BRANCH_KEY);
 }
@@ -80,9 +98,9 @@ export async function reach(url: string, init?: RequestInit): Promise<Response> 
 }
 
 export async function api(path: string, options: RequestInit = {}) {
-  if (PREVIEW) {
-    if ((options.method ?? "GET").toUpperCase() !== "GET") throw new Error(PREVIEW_MESSAGE);
-    return previewGet(path);
+  if (isDemo()) {
+    if ((options.method ?? "GET").toUpperCase() !== "GET") throw new Error(DEMO_MESSAGE);
+    return demoGet(path);
   }
   const token = getToken();
   const res = await reach(`${API_BASE}/api/v1${path}`, {
@@ -109,7 +127,6 @@ export async function api(path: string, options: RequestInit = {}) {
 }
 
 export async function login(email: string, password: string) {
-  if (PREVIEW) return {};
   const res = await reach(`${API_BASE}/api/v1/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...CLIENT_HEADER },
@@ -124,7 +141,7 @@ export async function login(email: string, password: string) {
   return data;
 }
 export async function uploadFile(path: string, file: File) {
-  if (PREVIEW) throw new Error(PREVIEW_MESSAGE);
+  if (isDemo()) throw new Error(DEMO_MESSAGE);
   const token = getToken();
   const form = new FormData();
   form.append("file", file);
@@ -146,7 +163,7 @@ export async function uploadFile(path: string, file: File) {
 }
 /** Download a file from the API (PDFs etc.) with the same auth and branch headers as api(). */
 export async function downloadFile(path: string, filename: string) {
-  if (PREVIEW) throw new Error("Downloads aren't available in the preview.");
+  if (isDemo()) throw new Error("Downloads aren't available in the demo.");
   const token = getToken();
   const res = await reach(`${API_BASE}/api/v1${path}`, {
     headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...branchHeader(), ...CLIENT_HEADER },
@@ -189,7 +206,6 @@ export async function fetchMe(): Promise<Me> {
   return api("/auth/me");
 }
 export async function register(tenant_name: string, email: string, password: string) {
-  if (PREVIEW) throw new Error(PREVIEW_MESSAGE);
   const res = await reach(`${API_BASE}/api/v1/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...CLIENT_HEADER },
@@ -224,14 +240,7 @@ const SITE_OFFLINE: SiteStatus = {
   read_only_message: null, banner_text: null, banner_tone: "info", offline: true,
 };
 
-// What the pages see in preview mode: everything open, no notices.
-const SITE_PREVIEW: SiteStatus = {
-  sign_in_enabled: true, sign_up_enabled: false, read_only: false, closed_message: null,
-  read_only_message: null, banner_text: null, banner_tone: "info",
-};
-
 export async function getSite(): Promise<SiteStatus> {
-  if (PREVIEW) return SITE_PREVIEW;
   try {
     const res = await fetch(`${API_BASE}/api/v1/site`, { cache: "no-store" });
     return res.ok ? await res.json() : SITE_OFFLINE;
