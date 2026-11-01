@@ -24,7 +24,6 @@ class MeOut(UserOut):
     # billing: 'ok' | 'open' | 'overdue' | 'read_only', and a notice to show (if any)
     billing_state: str = "ok"
     billing_message: str | None = None
-    is_platform_admin: bool = False
 
 
 class UserCreate(BaseModel):

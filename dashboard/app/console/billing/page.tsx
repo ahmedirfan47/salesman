@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, downloadFile } from "@/lib/api";
-import { useMe } from "@/lib/use-me";
+import { consoleApi, consoleDownload } from "@/lib/console-api";
 import { AccountState, Invoice, KIND_LABEL, STATE_LABEL, Subscription, day, money, statusBadge } from "@/lib/billing";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -48,27 +47,22 @@ function toForm(t: TenantDetail): SubForm {
   };
 }
 
-export default function PlatformPage() {
-  const { me, loading } = useMe();
+export default function ConsoleBillingPage() {
   const [rows, setRows] = useState<TenantRow[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
-  const allowed = !!me?.is_platform_admin;
 
   const load = useCallback(() => {
-    api("/platform/tenants").then(setRows).catch((e) => setError(e.message));
+    consoleApi("/platform/tenants").then(setRows).catch((e) => setError(e.message));
   }, []);
-  useEffect(() => { if (allowed) load(); }, [allowed, load]);
-
-  if (loading) return <p className="text-slate-400">Loading…</p>;
-  if (!allowed) return <p className="text-slate-400">Page not found.</p>;
+  useEffect(() => { load(); }, [load]);
 
   async function runBilling() {
     setBusy(true); setError(""); setMsg("");
     try {
-      const r = await api("/platform/billing/run", { method: "POST" });
+      const r = await consoleApi("/platform/billing/run", { method: "POST" });
       setMsg(r.issued ? `Issued ${r.issued} monthly invoice${r.issued === 1 ? "" : "s"}.` : "No monthly invoices were due.");
       load();
     } catch (e) { setError(e instanceof Error ? e.message : "Failed"); }
@@ -77,11 +71,7 @@ export default function PlatformPage() {
 
   return (
     <div>
-      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="mb-1 text-lg font-semibold">Billing</h2>
-          <p className="text-sm text-slate-500">Subscriptions and invoices for every business on Salesman.</p>
-        </div>
+      <div className="mb-6 flex sm:justify-end">
         <Button variant="outline" onClick={runBilling} disabled={busy}><RefreshCw size={16} /> Issue due invoices</Button>
       </div>
       {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
@@ -141,7 +131,7 @@ function TenantPanel({ tenantId, onChanged, onClose }: { tenantId: string; onCha
 
   const load = useCallback(async () => {
     try {
-      const d: TenantDetail = await api(`/platform/tenants/${tenantId}`);
+      const d: TenantDetail = await consoleApi(`/platform/tenants/${tenantId}`);
       setT(d);
       setForm(toForm(d)); // always show what the server saved (e.g. the next invoice date moves on)
     } catch (e) { setError(e instanceof Error ? e.message : "Failed"); }
@@ -165,7 +155,7 @@ function TenantPanel({ tenantId, onChanged, onClose }: { tenantId: string; onCha
       payment_terms_days: Number(f.payment_terms_days),
       grace_days: Number(f.grace_days),
     };
-    act(() => api(`/platform/tenants/${tenantId}/subscription`, { method: "PUT", body: JSON.stringify(body) }),
+    act(() => consoleApi(`/platform/tenants/${tenantId}/subscription`, { method: "PUT", body: JSON.stringify(body) }),
       t!.subscription ? "Subscription saved." : "Subscription started.");
   }
 
@@ -224,13 +214,13 @@ function TenantPanel({ tenantId, onChanged, onClose }: { tenantId: string; onCha
         <Button onClick={save} disabled={busy}>{t.subscription ? "Save subscription" : "Start subscription"}</Button>
         {t.subscription && t.unbilled_setup_branches > 0 && (
           <Button variant="outline" disabled={busy}
-            onClick={() => act(() => api(`/platform/tenants/${tenantId}/invoices/setup`, { method: "POST", body: "{}" }), "Setup invoice issued.")}>
+            onClick={() => act(() => consoleApi(`/platform/tenants/${tenantId}/invoices/setup`, { method: "POST", body: "{}" }), "Setup invoice issued.")}>
             Invoice setup for {t.unbilled_setup_branches} branch{t.unbilled_setup_branches === 1 ? "" : "es"}
           </Button>
         )}
         {t.subscription?.status === "active" && (
           <Button variant="outline" disabled={busy}
-            onClick={() => act(() => api(`/platform/tenants/${tenantId}/invoices/next`, { method: "POST" }), "Next monthly invoice issued.")}>
+            onClick={() => act(() => consoleApi(`/platform/tenants/${tenantId}/invoices/next`, { method: "POST" }), "Next monthly invoice issued.")}>
             Issue next monthly invoice now
           </Button>
         )}
@@ -273,14 +263,14 @@ function InvoiceRow({ inv, busy, act }: { inv: Invoice; busy: boolean; act: Act 
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="ghost" className="px-2 py-1 text-xs"
-            onClick={() => act(() => downloadFile(`/platform/invoices/${inv.id}/pdf`, `${inv.number}.pdf`), "")}>
+            onClick={() => act(() => consoleDownload(`/platform/invoices/${inv.id}/pdf`, `${inv.number}.pdf`), "")}>
             <Download size={14} /> PDF
           </Button>
           {inv.status === "open" && <Button variant="outline" className="px-2 py-1 text-xs" onClick={() => setMode(mode === "pay" ? "" : "pay")}>Mark paid</Button>}
           {inv.status === "open" && <Button variant="ghost" className="px-2 py-1 text-xs text-red-600" onClick={() => setMode(mode === "void" ? "" : "void")}>Void</Button>}
           {inv.status === "paid" && (
             <Button variant="ghost" className="px-2 py-1 text-xs" disabled={busy}
-              onClick={() => act(() => api(`/platform/invoices/${inv.id}/reopen`, { method: "POST" }), `${inv.number} reopened.`)}>
+              onClick={() => act(() => consoleApi(`/platform/invoices/${inv.id}/reopen`, { method: "POST" }), `${inv.number} reopened.`)}>
               Reopen
             </Button>
           )}
@@ -291,7 +281,7 @@ function InvoiceRow({ inv, busy, act }: { inv: Invoice; busy: boolean; act: Act 
           <Input type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} className="sm:w-44" />
           <Input placeholder="Bank reference (optional)" value={ref} onChange={(e) => setRef(e.target.value)} />
           <Button disabled={busy} onClick={() => act(
-            () => api(`/platform/invoices/${inv.id}/paid`, { method: "POST", body: JSON.stringify({ paid_on: paidOn, reference: ref }) }),
+            () => consoleApi(`/platform/invoices/${inv.id}/paid`, { method: "POST", body: JSON.stringify({ paid_on: paidOn, reference: ref }) }),
             `${inv.number} marked paid.`,
           )}>Confirm payment</Button>
         </div>
@@ -300,7 +290,7 @@ function InvoiceRow({ inv, busy, act }: { inv: Invoice; busy: boolean; act: Act 
         <div className="mt-3 flex flex-col gap-2 sm:flex-row">
           <Input placeholder="Reason, e.g. wrong branch count" value={reason} onChange={(e) => setReason(e.target.value)} />
           <Button variant="danger" disabled={busy || !reason.trim()} onClick={() => act(
-            () => api(`/platform/invoices/${inv.id}/void`, { method: "POST", body: JSON.stringify({ reason }) }),
+            () => consoleApi(`/platform/invoices/${inv.id}/void`, { method: "POST", body: JSON.stringify({ reason }) }),
             `${inv.number} voided.`,
           )}>Void invoice</Button>
         </div>
@@ -359,7 +349,7 @@ function CustomInvoice({ tenantId, busy, act }: { tenantId: string; busy: boolea
       </div>
       <div className="mt-3 flex gap-2">
         <Button disabled={busy || !valid} onClick={async () => {
-          await act(() => api(`/platform/tenants/${tenantId}/invoices`, {
+          await act(() => consoleApi(`/platform/tenants/${tenantId}/invoices`, {
             method: "POST",
             body: JSON.stringify({ lines, due_on: dueOn || null, notes: notes || null }),
           }), "Invoice issued.");

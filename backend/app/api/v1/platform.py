@@ -1,16 +1,16 @@
-"""Stonic's admin console: subscriptions and invoices for every business.
+"""Stonic Console billing: subscriptions and invoices for every business.
 
-Only users whose email is listed in PLATFORM_ADMIN_EMAILS can use these
-routes; everyone else gets 404, so the console isn't advertised.
+Only signed-in Stonic admins (app.modules.platform.admins) can use these routes.
 """
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from fastapi.responses import Response
 
-from app.core.deps import CurrentUser, DBSession
+from app.core.deps import DBSession
 from app.modules.billing import service
 from app.modules.billing.pdf import render_invoice_pdf
+from app.modules.platform.admins import get_current_admin
 from app.schemas.billing import (
     AccountStateOut,
     BillingRunOut,
@@ -25,14 +25,7 @@ from app.schemas.billing import (
     VoidIn,
 )
 
-
-async def require_platform_admin(user: CurrentUser):
-    if not service.is_platform_admin(user):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
-    return user
-
-
-router = APIRouter(prefix="/platform", tags=["platform"], dependencies=[Depends(require_platform_admin)])
+router = APIRouter(prefix="/platform", tags=["platform"], dependencies=[Depends(get_current_admin)])
 
 
 def _tenant_out(row: dict, cls=TenantBillingOut, **extra):

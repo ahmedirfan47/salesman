@@ -56,9 +56,11 @@ class Settings(BaseSettings):
     # Only for running Odoo on your own machine while developing; keep it off in production.
     ERP_ALLOW_PRIVATE_URLS: bool = False
 
-    # Billing. Stonic staff who run the admin console (/platform): comma-separated emails.
-    PLATFORM_ADMIN_EMAILS: str = ""
-    # Printed on every invoice. Separate lines in BILLING_SELLER_ADDRESS and
+    # Stonic Console (/console): how long an admin stays signed in.
+    # Admin accounts live in the database; make the first one with `python -m app.scripts.create_admin`.
+    ADMIN_TOKEN_EXPIRE_HOURS: int = 12
+
+    # Billing. Printed on every invoice. Separate lines in BILLING_SELLER_ADDRESS and
     # BILLING_BANK_DETAILS with " | ", e.g. "Bank: Meezan Bank | IBAN: PK00... | SWIFT: MEZNPKKA".
     BILLING_SELLER_NAME: str = "Stonic"
     BILLING_SELLER_ADDRESS: str = ""
@@ -86,10 +88,6 @@ class Settings(BaseSettings):
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
-
-    @property
-    def platform_admin_emails(self) -> set[str]:
-        return {e.strip().lower() for e in self.PLATFORM_ADMIN_EMAILS.split(",") if e.strip()}
 
 
 @lru_cache

@@ -1,32 +1,36 @@
 """The Stonic Console: site switches, analytics, businesses, people, system health and the audit log.
 
-Same gate as the billing console (app.api.v1.platform): only the emails in
-PLATFORM_ADMIN_EMAILS, and everyone else gets 404.
+Only signed-in Stonic admins (app.modules.platform.admins) can use these routes.
+Business accounts get 401 here, whatever their role.
 """
 import uuid
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 
-from app.api.v1.platform import require_platform_admin
-from app.core.deps import CurrentUser, DBSession
-from app.config import settings as app_settings
+from app.core.deps import DBSession
+from app.db.models.platform import PlatformAdmin
 from app.modules.platform import console, site
 from app.modules.platform.activity import audit
+from app.modules.platform.admins import CurrentAdmin, get_current_admin
 from app.schemas.console import AuditOut, PasswordIn, PersonUpdateIn, SiteSettingsIn, SuspendIn
 
-router = APIRouter(prefix="/platform", tags=["console"], dependencies=[Depends(require_platform_admin)])
+router = APIRouter(prefix="/platform", tags=["console"], dependencies=[Depends(get_current_admin)])
 
 
 # ---- site switches ----
 async def _settings_out(db) -> dict:
     updated_at, updated_by = await site.meta(db)
+    admins = await db.scalars(
+        select(PlatformAdmin.email).where(PlatformAdmin.is_active.is_(True)).order_by(PlatformAdmin.email)
+    )
     return {
         "settings": await site.stored(db),
         "effective": await site.public(db),
         "updated_at": updated_at,
         "updated_by": updated_by,
-        "admin_emails": sorted(app_settings.platform_admin_emails),
+        "admins": list(admins),
     }
 
 
@@ -36,15 +40,15 @@ async def get_settings(db: DBSession) -> dict:
 
 
 @router.put("/settings")
-async def save_settings(data: SiteSettingsIn, db: DBSession, user: CurrentUser) -> dict:
+async def save_settings(data: SiteSettingsIn, db: DBSession, admin: CurrentAdmin) -> dict:
     try:
         changes = site.clean(data.model_dump(exclude_none=True))
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
-    before, after = await site.save(db, changes, user.email)
+    before, after = await site.save(db, changes, admin.email)
     diff = {k: {"from": before[k], "to": after[k]} for k in changes if before[k] != after[k]}
     if diff:
-        audit(db, user, "site.settings", target_type="site", target_label="Site switches", detail=diff)
+        audit(db, admin, "site.settings", target_type="site", target_label="Site switches", detail=diff)
     await db.commit()
     return await _settings_out(db)
 
@@ -67,14 +71,14 @@ async def business(tenant_id: uuid.UUID, db: DBSession) -> dict:
 
 
 @router.post("/businesses/{tenant_id}/suspend")
-async def suspend(tenant_id: uuid.UUID, data: SuspendIn, db: DBSession, user: CurrentUser) -> dict:
-    await console.suspend(db, user, tenant_id, data.reason)
+async def suspend(tenant_id: uuid.UUID, data: SuspendIn, db: DBSession, admin: CurrentAdmin) -> dict:
+    await console.suspend(db, admin, tenant_id, data.reason)
     return await console.business_detail(db, tenant_id)
 
 
 @router.post("/businesses/{tenant_id}/reactivate")
-async def reactivate(tenant_id: uuid.UUID, db: DBSession, user: CurrentUser) -> dict:
-    await console.reactivate(db, user, tenant_id)
+async def reactivate(tenant_id: uuid.UUID, db: DBSession, admin: CurrentAdmin) -> dict:
+    await console.reactivate(db, admin, tenant_id)
     return await console.business_detail(db, tenant_id)
 
 
@@ -91,20 +95,20 @@ async def people(
 
 
 @router.patch("/people/{user_id}")
-async def update_person(user_id: uuid.UUID, data: PersonUpdateIn, db: DBSession, user: CurrentUser) -> dict:
-    u = await console.update_person(db, user, user_id, is_active=data.is_active, role=data.role)
+async def update_person(user_id: uuid.UUID, data: PersonUpdateIn, db: DBSession, admin: CurrentAdmin) -> dict:
+    u = await console.update_person(db, admin, user_id, is_active=data.is_active, role=data.role)
     return await console.person(db, u.id)
 
 
 @router.post("/people/{user_id}/password")
-async def set_password(user_id: uuid.UUID, data: PasswordIn, db: DBSession, user: CurrentUser) -> dict:
-    u = await console.set_password(db, user, user_id, data.password)
+async def set_password(user_id: uuid.UUID, data: PasswordIn, db: DBSession, admin: CurrentAdmin) -> dict:
+    u = await console.set_password(db, admin, user_id, data.password)
     return await console.person(db, u.id)
 
 
 @router.post("/people/{user_id}/sign-out")
-async def sign_out(user_id: uuid.UUID, db: DBSession, user: CurrentUser) -> dict:
-    u = await console.sign_out_everywhere(db, user, user_id)
+async def sign_out(user_id: uuid.UUID, db: DBSession, admin: CurrentAdmin) -> dict:
+    u = await console.sign_out_everywhere(db, admin, user_id)
     return await console.person(db, u.id)
 
 
@@ -115,14 +119,14 @@ async def system(db: DBSession) -> dict:
 
 
 @router.post("/jobs/{job_id}/retry")
-async def retry_job(job_id: uuid.UUID, db: DBSession, user: CurrentUser) -> dict:
-    job = await console.retry_job(db, user, job_id)
+async def retry_job(job_id: uuid.UUID, db: DBSession, admin: CurrentAdmin) -> dict:
+    job = await console.retry_job(db, admin, job_id)
     return {"id": job.id, "status": job.status}
 
 
 @router.post("/jobs/{job_id}/discard")
-async def discard_job(job_id: uuid.UUID, db: DBSession, user: CurrentUser) -> dict:
-    job = await console.discard_job(db, user, job_id)
+async def discard_job(job_id: uuid.UUID, db: DBSession, admin: CurrentAdmin) -> dict:
+    job = await console.discard_job(db, admin, job_id)
     return {"id": job.id, "status": job.status}
 
 

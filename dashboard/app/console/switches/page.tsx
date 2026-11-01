@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { consoleApi, SITE_CHANGED } from "@/lib/console-api";
 import { when, type SettingsResponse, type SiteSettings } from "@/lib/console";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ export default function SwitchesPage() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    api("/platform/settings")
+    consoleApi("/platform/settings")
       .then((r: SettingsResponse) => { setData(r); setForm(r.settings); })
       .catch((e) => setError(e.message));
   }, []);
@@ -25,9 +25,10 @@ export default function SwitchesPage() {
     setError("");
     setMsg("");
     try {
-      const r: SettingsResponse = await api("/platform/settings", { method: "PUT", body: JSON.stringify(changes) });
+      const r: SettingsResponse = await consoleApi("/platform/settings", { method: "PUT", body: JSON.stringify(changes) });
       setData(r);
       setForm(r.settings);
+      window.dispatchEvent(new CustomEvent(SITE_CHANGED, { detail: r.effective }));
       setMsg(done);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
@@ -43,7 +44,7 @@ export default function SwitchesPage() {
     <div className="max-w-3xl space-y-4">
       <p className="text-sm text-slate-500">
         These apply to the web dashboard and the mobile app straight away (within about 10 seconds). The WhatsApp agent keeps
-        serving customers whatever you choose. You always keep access as a Stonic admin.
+        serving customers whatever you choose. This console has its own sign-in, so the switches never lock you out.
       </p>
       {error && <p className="text-sm text-red-600">{error}</p>}
       {msg && <p className="text-sm text-emerald-700">{msg}</p>}
@@ -51,7 +52,7 @@ export default function SwitchesPage() {
       <SwitchCard
         icon={LogIn} title="Sign-in" on={s.sign_in_enabled} busy={busy}
         onText="Open: everyone with an account can sign in."
-        offText="Closed: only Stonic admins can sign in. Everyone else is signed out on their next click."
+        offText="Closed: nobody can sign in to the dashboard or the app. Anyone signed in is signed out on their next click."
         onToggle={() => save({ sign_in_enabled: !s.sign_in_enabled }, s.sign_in_enabled ? "Sign-in is closed." : "Sign-in is open.")}
       >
         <label className="mt-3 block text-xs font-medium text-slate-500">Message on the sign-in page while it is closed</label>
@@ -70,7 +71,7 @@ export default function SwitchesPage() {
 
       <SwitchCard
         icon={Lock} title="Read-only mode" on={s.read_only} busy={busy} onIsWarning
-        onText="On: everyone can look, nobody but Stonic can change anything. Use it for maintenance or a data move."
+        onText="On: everyone can look, nobody can change anything. Use it for maintenance or a data move."
         offText="Off: everything works normally."
         onToggle={() => save({ read_only: !s.read_only }, s.read_only ? "Read-only mode is off." : "Read-only mode is on.")}
       >
@@ -113,7 +114,7 @@ export default function SwitchesPage() {
       </Card>
 
       <p className="text-xs text-slate-400">
-        Stonic admins: {data.admin_emails.join(", ")}. Last changed {when(data.updated_at)}{data.updated_by ? ` by ${data.updated_by}` : ""}.
+        Console admins: {data.admins.join(", ")}. Last changed {when(data.updated_at)}{data.updated_by ? ` by ${data.updated_by}` : ""}.
       </p>
     </div>
   );

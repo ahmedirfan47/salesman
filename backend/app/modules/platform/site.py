@@ -4,17 +4,18 @@ Stored in one row (platform_settings, id = 1) and changed from the Stonic
 Console. Read on every signed-in request, so the values are cached in each
 process for a few seconds; a change reaches every server within that time.
 
-Stonic admins (PLATFORM_ADMIN_EMAILS) are never locked out. If that list is
-empty, the switches are ignored and the site stays open, so nobody can lock
-everyone out by mistake.
+The switches apply to the business app (web and mobile) only. Stonic admins
+work in the separate Stonic Console, which they never affect. Until at least
+one admin account exists the switches are ignored and the site stays open, so
+nobody can lock everyone out with no way back in.
 """
 import time
 from datetime import datetime, timezone
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings as app_settings
-from app.db.models.platform import PlatformSettings
+from app.db.models.platform import PlatformAdmin, PlatformSettings
 
 DEFAULTS: dict = {
     "sign_in_enabled": True,
@@ -30,7 +31,8 @@ TONES = ("info", "warning")
 SIGN_UP_CLOSED = "New sign-ups are closed right now. Contact Stonic to get an account."
 
 _CACHE_SECONDS = 10.0
-_cache: tuple[float, dict] | None = None
+# (when read, the saved switches, whether an active admin exists)
+_cache: tuple[float, dict, bool] | None = None
 
 
 def invalidate() -> None:
@@ -55,22 +57,27 @@ def _merge(data: dict | None) -> dict:
     return out
 
 
-async def stored(db: AsyncSession) -> dict:
-    """The switches as saved (what the console shows)."""
+async def _read(db: AsyncSession) -> tuple[dict, bool]:
     global _cache
     now = time.monotonic()
     if _cache is not None and now - _cache[0] < _CACHE_SECONDS:
-        return dict(_cache[1])
+        return dict(_cache[1]), _cache[2]
     row = await db.get(PlatformSettings, 1)
     values = _merge(row.data if row else None)
-    _cache = (now, values)
-    return dict(values)
+    has_admin = bool(await db.scalar(select(func.count(PlatformAdmin.id)).where(PlatformAdmin.is_active.is_(True))))
+    _cache = (now, values, has_admin)
+    return dict(values), has_admin
+
+
+async def stored(db: AsyncSession) -> dict:
+    """The switches as saved (what the console shows)."""
+    return (await _read(db))[0]
 
 
 async def effective(db: AsyncSession) -> dict:
-    """The switches as they apply right now (all open when no Stonic admin is configured)."""
-    values = await stored(db)
-    if not app_settings.platform_admin_emails:
+    """The switches as they apply right now (all open while no Stonic admin account exists)."""
+    values, has_admin = await _read(db)
+    if not has_admin:
         values.update(sign_in_enabled=True, sign_up_enabled=True, read_only=False)
     return values
 

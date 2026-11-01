@@ -1,4 +1,4 @@
-"""Requests to the Stonic Console. Answers are plain JSON built in app.modules.platform.console."""
+"""Requests to the Stonic Console and its admin accounts. Most answers are plain JSON built in app.modules.platform."""
 import uuid
 from datetime import datetime
 
@@ -41,3 +41,36 @@ class AuditOut(BaseModel):
     target_id: str | None
     target_label: str | None
     detail: dict
+
+
+class AdminLoginIn(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class AdminCreateIn(BaseModel):
+    email: str = Field(min_length=3, max_length=255, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    password: str = Field(min_length=10, max_length=128)
+    full_name: str | None = Field(default=None, max_length=255)
+
+
+class AdminUpdateIn(BaseModel):
+    is_active: bool | None = None
+    full_name: str | None = Field(default=None, max_length=255)
+
+
+class AdminPasswordIn(BaseModel):
+    password: str = Field(min_length=10, max_length=128)
+    current_password: str | None = Field(default=None, max_length=128)  # needed for your own
+
+
+class AdminOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    email: str
+    full_name: str | None
+    is_active: bool
+    created_at: datetime
+    last_login_at: datetime | None
+    last_seen_at: datetime | None

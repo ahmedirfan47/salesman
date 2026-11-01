@@ -1,4 +1,4 @@
-// Types and helpers for the Stonic Console (/platform).
+// Types and helpers for the Stonic Console (/console).
 
 export type SiteSettings = {
   sign_in_enabled: boolean;
@@ -15,7 +15,8 @@ export type SettingsResponse = {
   effective: { sign_in_enabled: boolean; sign_up_enabled: boolean; read_only: boolean };
   updated_at: string | null;
   updated_by: string | null;
-  admin_emails: string[];
+  /** Emails of the admins who can sign in to the console */
+  admins: string[];
 };
 
 export type SeriesPoint = {
@@ -75,7 +76,6 @@ export type Person = {
   created_at: string;
   last_login_at: string | null;
   last_seen_at: string | null;
-  is_platform_admin: boolean;
 };
 
 export type SignIn = {
@@ -116,7 +116,7 @@ export type ConfigItem = { key: string; ok: boolean; note: string };
 
 export type SystemStatus = {
   checked_at: string;
-  server: { environment: string; version: string; python: string; started_at: string; uptime_seconds: number; worker_enabled: boolean };
+  server: { environment: string; version: string; python: string; started_at: string; uptime_seconds: number; worker_enabled: boolean; admins: number };
   database: { ok: boolean; latency_ms?: number; size_mb?: number; version?: string; error?: string };
   jobs: { kinds: JobKind[]; oldest_waiting_seconds: number; failed: FailedJob[] };
   zatca: {
@@ -151,6 +151,11 @@ export const ACTION_LABEL: Record<string, string> = {
   "person.sign_out": "Signed someone out everywhere",
   "job.retry": "Retried a background job",
   "job.discard": "Discarded a background job",
+  "admin.sign_in": "Signed in to the console",
+  "admin.sign_in_failed": "Failed console sign-in",
+  "admin.create": "Added an admin",
+  "admin.update": "Changed an admin",
+  "admin.password": "Set an admin password",
 };
 
 export const SIGN_IN_REASON: Record<string, string> = {

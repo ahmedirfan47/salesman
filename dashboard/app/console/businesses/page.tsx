@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { consoleApi } from "@/lib/console-api";
 import { ago, CLIENT_LABEL, num, SIGN_IN_REASON, when, type BusinessDetail, type BusinessRow } from "@/lib/console";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,7 +17,7 @@ export default function BusinessesPage() {
   const [error, setError] = useState("");
 
   const load = useCallback(() => {
-    api("/platform/businesses").then(setRows).catch((e) => setError(e.message));
+    consoleApi("/platform/businesses").then(setRows).catch((e) => setError(e.message));
   }, []);
   useEffect(() => {
     load();
@@ -96,14 +96,14 @@ function BusinessPanel({ id, onChanged, onClose }: { id: string; onChanged: () =
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api(`/platform/businesses/${id}`).then(setB).catch((e) => setError(e.message));
+    consoleApi(`/platform/businesses/${id}`).then(setB).catch((e) => setError(e.message));
   }, [id]);
 
   async function act(path: string, body?: object) {
     setBusy(true);
     setError("");
     try {
-      setB(await api(`/platform/businesses/${id}/${path}`, { method: "POST", body: body ? JSON.stringify(body) : undefined }));
+      setB(await consoleApi(`/platform/businesses/${id}/${path}`, { method: "POST", body: body ? JSON.stringify(body) : undefined }));
       setConfirm(false);
       setReason("");
       onChanged();
@@ -165,7 +165,7 @@ function BusinessPanel({ id, onChanged, onClose }: { id: string; onChanged: () =
                   <td className="py-2 pr-3 text-slate-500">{p.branch ?? "All branches"}</td>
                   <td className="whitespace-nowrap py-2 pr-3 text-slate-500">{ago(p.last_seen_at)}</td>
                   <td className="py-2 text-right">
-                    <Link href={`/platform/people?q=${encodeURIComponent(p.email)}`} className="text-xs font-medium text-[var(--primary)] hover:underline">Manage</Link>
+                    <Link href={`/console/people?q=${encodeURIComponent(p.email)}`} className="text-xs font-medium text-[var(--primary)] hover:underline">Manage</Link>
                   </td>
                 </tr>
               ))}

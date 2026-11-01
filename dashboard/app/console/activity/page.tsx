@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { consoleApi } from "@/lib/console-api";
 import { ACTION_LABEL, CLIENT_LABEL, SIGN_IN_REASON, when, type AuditEntry, type SignIn } from "@/lib/console";
 import { Card } from "@/components/ui/card";
 import { TableScroll } from "@/components/table-scroll";
@@ -30,10 +30,10 @@ export default function ActivityPage() {
     setError("");
     if (tab === "actions") {
       setAudit(null);
-      api("/platform/audit").then(setAudit).catch((e) => setError(e.message));
+      consoleApi("/platform/audit").then(setAudit).catch((e) => setError(e.message));
     } else {
       setSignIns(null);
-      api(`/platform/sign-ins${tab === "failed" ? "?failed=true" : ""}`).then(setSignIns).catch((e) => setError(e.message));
+      consoleApi(`/platform/sign-ins${tab === "failed" ? "?failed=true" : ""}`).then(setSignIns).catch((e) => setError(e.message));
     }
   }, [tab]);
 

@@ -1,7 +1,7 @@
-"""Stonic's own records about the platform: site switches, usage and an audit trail.
+"""Stonic's own records about the platform: admin accounts, site switches, usage and an audit trail.
 
 None of these belong to a business. They are read and changed only through
-the Stonic Console (app.api.v1.console).
+the Stonic Console (/console in the dashboard; app.api.v1.console and admin).
 """
 import uuid
 from datetime import date, datetime
@@ -12,6 +12,25 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 from app.db.models.mixins import TimestampMixin, UUIDPKMixin
+
+
+class PlatformAdmin(UUIDPKMixin, TimestampMixin, Base):
+    """A Stonic staff account for the Stonic Console. Not part of any business.
+
+    The first one is made with `python -m app.scripts.create_admin`; after that,
+    admins add each other from the console.
+    """
+
+    __tablename__ = "platform_admins"
+
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Raising this ends every console session of this admin.
+    token_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
 
 
 class PlatformSettings(Base):
@@ -62,13 +81,13 @@ class LoginEvent(UUIDPKMixin, TimestampMixin, Base):
 
 
 class AdminAuditLog(UUIDPKMixin, TimestampMixin, Base):
-    """Every change made from the Stonic Console, and who made it."""
+    """Every change made from the Stonic Console, and who made it (plus console sign-ins)."""
 
     __tablename__ = "admin_audit_log"
     __table_args__ = (Index("ix_admin_audit_log_created_at", "created_at"),)
 
     actor_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), ForeignKey("platform_admins.id", ondelete="SET NULL"), nullable=True
     )
     actor_email: Mapped[str] = mapped_column(String(255), nullable=False)
     action: Mapped[str] = mapped_column(String(60), nullable=False)

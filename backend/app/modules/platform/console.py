@@ -1,5 +1,7 @@
 """What the Stonic Console shows and does across every business on the platform.
 
+The actor of every change is a Stonic admin (PlatformAdmin), never a business user.
+
 Read-only queries (analytics, businesses, people, system health) and the few
 changes Stonic makes on a business's behalf (suspend, switch a person off,
 set a password, end sessions, retry or discard a background job). Every
@@ -26,13 +28,12 @@ from app.db.models.integration import IntegrationConnection, IntegrationEvent
 from app.db.models.job import Job
 from app.db.models.message import Message
 from app.db.models.order import Order
-from app.db.models.platform import AdminAuditLog, LoginEvent, UserActivity
+from app.db.models.platform import AdminAuditLog, LoginEvent, PlatformAdmin, UserActivity
 from app.db.models.product import Product
 from app.db.models.tenant import Tenant
 from app.db.models.user import User
 from app.db.models.zatca import ZatcaDocument, ZatcaUnit
 from app.modules.analytics.service import REVENUE_STATUSES
-from app.modules.platform.access import is_platform_admin
 from app.modules.platform.activity import audit
 
 PERIODS = (7, 30, 90)
@@ -228,7 +229,6 @@ def person_row(u: User, business: str | None = None, branch: str | None = None) 
         "id": u.id, "tenant_id": u.tenant_id, "business": business, "email": u.email, "full_name": u.full_name,
         "role": u.role, "is_active": u.is_active, "branch": branch, "created_at": u.created_at,
         "last_login_at": u.last_login_at, "last_seen_at": u.last_seen_at,
-        "is_platform_admin": is_platform_admin(u),
     }
 
 
@@ -279,10 +279,8 @@ async def business_detail(db: AsyncSession, tenant_id: uuid.UUID) -> dict:
     }
 
 
-async def suspend(db: AsyncSession, actor: User, tenant_id: uuid.UUID, reason: str) -> Tenant:
+async def suspend(db: AsyncSession, actor: PlatformAdmin, tenant_id: uuid.UUID, reason: str) -> Tenant:
     t = await _tenant(db, tenant_id)
-    if t.id == actor.tenant_id:
-        raise HTTPException(status.HTTP_409_CONFLICT, "You can't suspend your own business")
     if t.suspended_at is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "This business is already suspended")
     t.suspended_at, t.suspended_reason = _now(), reason.strip()[:255]
@@ -292,7 +290,7 @@ async def suspend(db: AsyncSession, actor: User, tenant_id: uuid.UUID, reason: s
     return t
 
 
-async def reactivate(db: AsyncSession, actor: User, tenant_id: uuid.UUID) -> Tenant:
+async def reactivate(db: AsyncSession, actor: PlatformAdmin, tenant_id: uuid.UUID) -> Tenant:
     t = await _tenant(db, tenant_id)
     if t.suspended_at is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "This business isn't suspended")
@@ -350,15 +348,13 @@ async def _other_active_owner(db: AsyncSession, u: User) -> bool:
     ))
 
 
-async def update_person(db: AsyncSession, actor: User, user_id: uuid.UUID, *, is_active: bool | None,
+async def update_person(db: AsyncSession, actor: PlatformAdmin, user_id: uuid.UUID, *, is_active: bool | None,
                         role: str | None) -> User:
     from app.modules.users.service import _branch_for
 
     u = await _person(db, user_id)
     changes: dict = {}
     if is_active is not None and is_active != u.is_active:
-        if u.id == actor.id:
-            raise HTTPException(status.HTTP_409_CONFLICT, "You can't switch off your own account")
         if not is_active and u.role == UserRole.OWNER.value and not await _other_active_owner(db, u):
             raise HTTPException(status.HTTP_409_CONFLICT,
                                 "This is the business's only owner. Make someone else owner first.")
@@ -387,23 +383,20 @@ async def update_person(db: AsyncSession, actor: User, user_id: uuid.UUID, *, is
     return u
 
 
-async def set_password(db: AsyncSession, actor: User, user_id: uuid.UUID, password: str) -> User:
+async def set_password(db: AsyncSession, actor: PlatformAdmin, user_id: uuid.UUID, password: str) -> User:
     u = await _person(db, user_id)
     if len(password) < 8:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "The password must be at least 8 characters")
     u.password_hash = hash_password(password)
-    if u.id != actor.id:
-        u.token_version += 1  # the old password's sessions end
+    u.token_version += 1  # the old password's sessions end
     audit(db, actor, "person.password", target_type="person", target_id=u.id, target_label=u.email)
     await db.commit()
     await db.refresh(u)
     return u
 
 
-async def sign_out_everywhere(db: AsyncSession, actor: User, user_id: uuid.UUID) -> User:
+async def sign_out_everywhere(db: AsyncSession, actor: PlatformAdmin, user_id: uuid.UUID) -> User:
     u = await _person(db, user_id)
-    if u.id == actor.id:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Use Sign out to end your own session")
     u.token_version += 1
     audit(db, actor, "person.sign_out", target_type="person", target_id=u.id, target_label=u.email)
     await db.commit()
@@ -437,9 +430,6 @@ def _config() -> list[dict]:
     llm_set = bool(s.LLM_API_KEY and s.LLM_API_KEY != "ollama") or "localhost" not in s.LLM_BASE_URL
     production = s.ENVIRONMENT.lower() == "production"
     return [
-        {"key": "PLATFORM_ADMIN_EMAILS", "ok": bool(s.platform_admin_emails),
-         "note": f"{len(s.platform_admin_emails)} Stonic admin(s)" if s.platform_admin_emails
-         else "Empty: the console is hidden and the site switches have no effect"},
         {"key": "SECRETS_KEY", "ok": bool(s.SECRETS_KEY),
          "note": "Set" if s.SECRETS_KEY else "Empty: stored secrets fall back to JWT_SECRET. Set it once and never change it."},
         {"key": "LLM_API_KEY", "ok": llm_set,
@@ -525,13 +515,16 @@ async def system(db: AsyncSession) -> dict:
         select(Message.direction, func.count(Message.id)).where(Message.created_at >= day_ago).group_by(Message.direction)
     ))
     last_inbound = await db.scalar(select(func.max(Message.created_at)).where(Message.direction == "in"))
+    admins_active = int(await db.scalar(
+        select(func.count(PlatformAdmin.id)).where(PlatformAdmin.is_active.is_(True))
+    ) or 0)
 
     return {
         "checked_at": now,
         "server": {
             "environment": settings.ENVIRONMENT, "version": "0.1.0", "python": host.python_version(),
             "started_at": STARTED_AT, "uptime_seconds": int(time.monotonic() - _STARTED_MONO),
-            "worker_enabled": settings.JOB_WORKER_ENABLED,
+            "worker_enabled": settings.JOB_WORKER_ENABLED, "admins": admins_active,
         },
         "database": database,
         "jobs": {
@@ -572,7 +565,7 @@ async def _job(db: AsyncSession, job_id: uuid.UUID) -> Job:
     return job
 
 
-async def retry_job(db: AsyncSession, actor: User, job_id: uuid.UUID) -> Job:
+async def retry_job(db: AsyncSession, actor: PlatformAdmin, job_id: uuid.UUID) -> Job:
     job = await _job(db, job_id)
     if job.status not in ("failed", "discarded"):
         raise HTTPException(status.HTTP_409_CONFLICT, f"Only failed jobs can be retried (this one is {job.status})")
@@ -583,7 +576,7 @@ async def retry_job(db: AsyncSession, actor: User, job_id: uuid.UUID) -> Job:
     return job
 
 
-async def discard_job(db: AsyncSession, actor: User, job_id: uuid.UUID) -> Job:
+async def discard_job(db: AsyncSession, actor: PlatformAdmin, job_id: uuid.UUID) -> Job:
     job = await _job(db, job_id)
     if job.status not in ("failed", "queued"):
         raise HTTPException(status.HTTP_409_CONFLICT, f"Only failed or waiting jobs can be discarded (this one is {job.status})")

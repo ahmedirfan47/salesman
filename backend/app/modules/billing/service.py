@@ -64,10 +64,6 @@ def add_months(d: date, months: int = 1) -> date:
     return date(year, month, min(d.day, calendar.monthrange(year, month)[1]))
 
 
-def is_platform_admin(user: User) -> bool:
-    return bool(user and user.is_active and user.email and user.email.lower() in settings.platform_admin_emails)
-
-
 # --- lookups --------------------------------------------------------------------
 
 async def get_tenant(db: AsyncSession, tenant_id: uuid.UUID) -> Tenant:

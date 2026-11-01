@@ -131,7 +131,6 @@ export type Me = {
   /** "ok" | "open" | "overdue" | "read_only" */
   billing_state: string;
   billing_message: string | null;
-  is_platform_admin: boolean;
 };
 
 export async function fetchMe(): Promise<Me> {

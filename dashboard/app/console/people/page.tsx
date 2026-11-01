@@ -1,20 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "@/lib/api";
-import { useMe } from "@/lib/use-me";
+import { consoleApi } from "@/lib/console-api";
 import { ago, ROLES, when, type Person } from "@/lib/console";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TableScroll } from "@/components/table-scroll";
-import { KeyRound, LogOut, Power, Search, ShieldCheck, X } from "lucide-react";
+import { KeyRound, LogOut, Power, Search, X } from "lucide-react";
 
 const select = "rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm";
 type State = "" | "active" | "inactive" | "online";
 
 export default function PeoplePage() {
-  const { me } = useMe();
   const [q, setQ] = useState("");
   const [role, setRole] = useState("");
   const [state, setState] = useState<State>("");
@@ -27,7 +25,7 @@ export default function PeoplePage() {
     if (query.trim()) params.set("q", query.trim());
     if (r) params.set("role", r);
     if (st) params.set("state", st);
-    api(`/platform/people?${params}`).then(setRows).catch((e) => setError(e.message));
+    consoleApi(`/platform/people?${params}`).then(setRows).catch((e) => setError(e.message));
   }, []);
 
   useEffect(() => {
@@ -82,10 +80,7 @@ export default function PeoplePage() {
                 <tr key={p.id} onClick={() => setSelected(p)}
                   className={`cursor-pointer border-b border-[var(--border)] last:border-0 hover:bg-gray-50 ${selected?.id === p.id ? "bg-indigo-50/50" : ""}`}>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-1.5 font-medium">
-                      {p.full_name || p.email}
-                      {p.is_platform_admin && <ShieldCheck size={14} className="text-[var(--primary)]" aria-label="Stonic admin" />}
-                    </div>
+                    <div className="font-medium">{p.full_name || p.email}</div>
                     {p.full_name && <div className="text-xs text-slate-400">{p.email}</div>}
                   </td>
                   <td className="px-4 py-3">{p.business}</td>
@@ -107,14 +102,14 @@ export default function PeoplePage() {
       </Card>
 
       {selected && (
-        <PersonPanel key={selected.id} person={selected} isMe={selected.id === me?.id} onChanged={changed} onClose={() => setSelected(null)} />
+        <PersonPanel key={selected.id} person={selected} onChanged={changed} onClose={() => setSelected(null)} />
       )}
     </div>
   );
 }
 
-function PersonPanel({ person: p, isMe, onChanged, onClose }: {
-  person: Person; isMe: boolean; onChanged: (p: Person) => void; onClose: () => void;
+function PersonPanel({ person: p, onChanged, onClose }: {
+  person: Person; onChanged: (p: Person) => void; onClose: () => void;
 }) {
   const [role, setRole] = useState(p.role);
   const panel = useRef<HTMLDivElement>(null);
@@ -130,7 +125,7 @@ function PersonPanel({ person: p, isMe, onChanged, onClose }: {
     setError("");
     setMsg("");
     try {
-      onChanged(await api(`/platform/people/${p.id}${path}`, { method, body: body ? JSON.stringify(body) : undefined }));
+      onChanged(await consoleApi(`/platform/people/${p.id}${path}`, { method, body: body ? JSON.stringify(body) : undefined }));
       setMsg(done);
       setPassword("");
     } catch (e) {
@@ -170,7 +165,7 @@ function PersonPanel({ person: p, isMe, onChanged, onClose }: {
               <Input type="password" autoComplete="new-password" placeholder="At least 8 characters" value={password}
                 onChange={(e) => setPassword(e.target.value)} />
               <Button variant="outline" disabled={busy || password.length < 8}
-                onClick={() => run("/password", "POST", { password }, isMe ? "Password changed." : "Password set. Their other sessions have ended.")}>
+                onClick={() => run("/password", "POST", { password }, "Password set. Their other sessions have ended.")}>
                 <KeyRound size={16} /> Set
               </Button>
             </div>
@@ -178,18 +173,13 @@ function PersonPanel({ person: p, isMe, onChanged, onClose }: {
           <div>
             <label className="text-xs font-medium text-slate-500">Access</label>
             <div className="mt-1 flex flex-wrap gap-2">
-              {!isMe && (
-                <Button variant="outline" disabled={busy} className={p.is_active ? "text-red-700" : ""}
-                  onClick={() => run("", "PATCH", { is_active: !p.is_active }, p.is_active ? "Switched off. They can't sign in." : "Switched on.")}>
-                  <Power size={16} /> {p.is_active ? "Switch off" : "Switch on"}
-                </Button>
-              )}
-              {!isMe && (
-                <Button variant="outline" disabled={busy} onClick={() => run("/sign-out", "POST", undefined, "Signed out on every device.")}>
-                  <LogOut size={16} /> Sign out everywhere
-                </Button>
-              )}
-              {isMe && <p className="text-sm text-slate-400">This is you.</p>}
+              <Button variant="outline" disabled={busy} className={p.is_active ? "text-red-700" : ""}
+                onClick={() => run("", "PATCH", { is_active: !p.is_active }, p.is_active ? "Switched off. They can't sign in." : "Switched on.")}>
+                <Power size={16} /> {p.is_active ? "Switch off" : "Switch on"}
+              </Button>
+              <Button variant="outline" disabled={busy} onClick={() => run("/sign-out", "POST", undefined, "Signed out on every device.")}>
+                <LogOut size={16} /> Sign out everywhere
+              </Button>
             </div>
           </div>
         </div>

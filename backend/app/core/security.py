@@ -56,5 +56,19 @@ def create_refresh_token(subject: uuid.UUID, tenant_id: uuid.UUID, role: str, ve
     )
 
 
+def create_admin_token(admin_id: uuid.UUID, version: int = 0) -> str:
+    """A Stonic Console session. The business API refuses it (its type is not 'access')."""
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(admin_id),
+        "type": "admin",
+        "iat": now,
+        "exp": now + timedelta(hours=settings.ADMIN_TOKEN_EXPIRE_HOURS),
+        "jti": str(uuid.uuid4()),
+        "ver": version,
+    }
+    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+
+
 def decode_token(token: str) -> dict[str, Any]:
     return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])

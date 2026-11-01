@@ -80,5 +80,4 @@ async def me(user: CurrentUser, db: DBSession) -> MeOut:
     data.billing_message = billing.state_message(
         acct, admin=has_capability(user.role, Capability.VIEW_BILLING) and user.role != "demo"
     )
-    data.is_platform_admin = billing.is_platform_admin(user)
     return data

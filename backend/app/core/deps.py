@@ -54,15 +54,15 @@ async def get_current_user(
         raise HTTPException(status.HTTP_403_FORBIDDEN, DEMO_READ_ONLY_MESSAGE)
     if request.method not in _SAFE_METHODS:
         # The whole site in read-only mode (switched on from the Stonic Console).
-        message = await access.read_only_message(db, user)
+        message = await access.read_only_message(db)
         if message:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, message)
         # Same choke point for accounts with an invoice overdue past the grace
-        # period: everything stays viewable, nothing can be changed. Stonic's
-        # own admins are exempt so they can still mark the invoice paid.
+        # period: everything stays viewable, nothing can be changed. Stonic
+        # marks the invoice paid from the Stonic Console, which this doesn't touch.
         from app.modules.billing import service as billing
 
-        if not billing.is_platform_admin(user) and await billing.is_read_only(db, user.tenant_id):
+        if await billing.is_read_only(db, user.tenant_id):
             raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, billing.READ_ONLY_DETAIL)
     try:
         await activity.touch(db, user, request)

@@ -10,17 +10,16 @@ from sqlalchemy import func, select
 
 from app.config import settings
 from app.core.branches import default_branch
-from app.core.security import create_access_token, hash_password
+from app.core.security import create_access_token, create_admin_token, hash_password
 from app.db.models.billing import Invoice
 from app.db.models.branch import Branch
+from app.db.models.platform import PlatformAdmin
 from app.db.models.tenant import Tenant
 from app.db.models.user import User
 from app.db.session import get_session
 from app.main import app
 from app.modules.billing import service as billing
 from app.modules.billing.pdf import render_invoice_pdf
-
-ADMIN_EMAIL = "ops@stonic-hq.com"
 
 
 @pytest_asyncio.fixture
@@ -36,9 +35,16 @@ async def client(db):
 
 
 @pytest.fixture(autouse=True)
-def _platform_admin(monkeypatch):
-    monkeypatch.setattr(settings, "PLATFORM_ADMIN_EMAILS", f"{ADMIN_EMAIL}, other@stonic-hq.com")
+def _bank_details(monkeypatch):
     monkeypatch.setattr(settings, "BILLING_BANK_DETAILS", "Bank: Test Bank | IBAN: SA00 0000 0000 0000")
+
+
+async def _console(db):
+    """A Stonic Console session."""
+    a = PlatformAdmin(email=f"ops-{uuid.uuid4().hex[:6]}@stonic-hq.com", password_hash=hash_password("console-pass-1"))
+    db.add(a)
+    await db.commit()
+    return {"Authorization": f"Bearer {create_admin_token(a.id, a.token_version)}"}
 
 
 async def _tenant(db, name="Al Rayyan Fresh", branches=1):
@@ -180,8 +186,7 @@ async def test_overdue_account_is_read_only_until_paid(db, client):
     t, inv = await _overdue_tenant(db)
     owner = await _user(db, t, "owner")
     driver = await _user(db, t, "driver")
-    stonic = await _tenant(db, "Stonic")
-    ops = await _user(db, stonic, "owner", email=ADMIN_EMAIL)
+    ops = await _console(db)
 
     # reading still works; changing anything is refused with 402
     assert (await client.get("/api/v1/orders", headers=_auth(owner))).status_code == 200
@@ -193,16 +198,9 @@ async def test_overdue_account_is_read_only_until_paid(db, client):
     staff = (await client.get("/api/v1/auth/me", headers=_auth(driver))).json()
     assert "contact your administrator" in staff["billing_message"] and inv.number not in staff["billing_message"]
 
-    r = await client.post(f"/api/v1/platform/invoices/{inv.id}/paid", headers=_auth(ops), json={"reference": "SNB 4471"})
+    r = await client.post(f"/api/v1/platform/invoices/{inv.id}/paid", headers=ops, json={"reference": "SNB 4471"})
     assert r.status_code == 200 and r.json()["status"] == "paid"
     r = await client.post("/api/v1/products", headers=_auth(owner), json={"sku": "X-1", "name_en": "X"})
-    assert r.status_code == 201
-
-
-async def test_platform_admin_is_never_blocked(db, client):
-    t, _ = await _overdue_tenant(db)
-    ops = await _user(db, t, "owner", email=ADMIN_EMAIL)
-    r = await client.post("/api/v1/products", headers=_auth(ops), json={"sku": "X-2", "name_en": "X"})
     assert r.status_code == 201
 
 
@@ -237,17 +235,14 @@ async def test_billing_page_shows_invoices_and_bank_details(db, client):
 async def test_console_is_hidden_from_everyone_else(db, client):
     t = await _tenant(db)
     owner = await _user(db, t, "owner")
-    assert (await client.get("/api/v1/platform/tenants", headers=_auth(owner))).status_code == 404
+    assert (await client.get("/api/v1/platform/tenants", headers=_auth(owner))).status_code == 401
     me = (await client.get("/api/v1/auth/me", headers=_auth(owner))).json()
-    assert me["is_platform_admin"] is False
+    assert "is_platform_admin" not in me
 
 
 async def test_console_sets_up_and_bills_a_business(db, client):
-    stonic = await _tenant(db, "Stonic")
-    ops = await _user(db, stonic, "owner", email=ADMIN_EMAIL)
     customer = await _tenant(db, "Al Rayyan Fresh", branches=3)
-    h = _auth(ops)
-    assert (await client.get("/api/v1/auth/me", headers=h)).json()["is_platform_admin"] is True
+    h = await _console(db)
 
     r = await client.put(f"/api/v1/platform/tenants/{customer.id}/subscription", headers=h, json={
         "next_invoice_on": str(billing.today() + timedelta(days=5)), "billing_name": "Al Rayyan Fresh Trading Co.",

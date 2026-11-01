@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { consoleApi } from "@/lib/console-api";
 import { ago, num, type Overview } from "@/lib/console";
 import { Card } from "@/components/ui/card";
 import { TableScroll } from "@/components/table-scroll";
@@ -27,7 +27,7 @@ export default function ConsoleOverview() {
 
   useEffect(() => {
     setError("");
-    api(`/platform/overview?days=${days}`).then(setData).catch((e) => setError(e.message));
+    consoleApi(`/platform/overview?days=${days}`).then(setData).catch((e) => setError(e.message));
   }, [days]);
 
   const series = (data?.series ?? []).map((p) => ({ ...p, label: shortDay(p.day) }));
@@ -121,7 +121,7 @@ export default function ConsoleOverview() {
                       {data.top_businesses.map((b) => (
                         <tr key={b.id} className="border-t border-[var(--border)]">
                           <td className="py-2 pr-3">
-                            <Link href={`/platform/businesses?id=${b.id}`} className="font-medium hover:text-[var(--primary)]">{b.name}</Link>
+                            <Link href={`/console/businesses?id=${b.id}`} className="font-medium hover:text-[var(--primary)]">{b.name}</Link>
                           </td>
                           <td className="py-2 pr-3 text-right tabular-nums">{num(b.orders)}</td>
                           <td className="py-2 pr-3 text-right tabular-nums">{num(b.active_people)}</td>

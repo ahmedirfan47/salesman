@@ -92,9 +92,9 @@ def login_event(db: AsyncSession, request: Request | None, email: str, *, user: 
     ))
 
 
-def audit(db: AsyncSession, actor: User, action: str, *, target_type: str | None = None,
+def audit(db: AsyncSession, actor, action: str, *, target_type: str | None = None,
           target_id=None, target_label: str | None = None, detail: dict | None = None) -> None:
-    """Add a console action to the audit log. The caller commits."""
+    """Add a console action to the audit log. `actor` is the PlatformAdmin. The caller commits."""
     db.add(AdminAuditLog(
         actor_id=actor.id, actor_email=actor.email, action=action, target_type=target_type,
         target_id=str(target_id) if target_id is not None else None,

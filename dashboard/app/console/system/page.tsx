@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { consoleApi } from "@/lib/console-api";
 import { ago, duration, JOB_LABEL, num, when, type SystemStatus } from "@/lib/console";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ export default function SystemPage() {
 
   const load = useCallback(() => {
     setError("");
-    api("/platform/system").then(setData).catch((e) => setError(e.message));
+    consoleApi("/platform/system").then(setData).catch((e) => setError(e.message));
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -23,7 +23,7 @@ export default function SystemPage() {
     setBusy(id);
     setError("");
     try {
-      await api(`/platform/jobs/${id}/${action}`, { method: "POST" });
+      await consoleApi(`/platform/jobs/${id}/${action}`, { method: "POST" });
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
@@ -51,6 +51,7 @@ export default function SystemPage() {
             ["Environment", data.server.environment],
             ["Running for", duration(data.server.uptime_seconds)],
             ["Background jobs", data.server.worker_enabled ? "Run in this server" : "Off in this server"],
+            ["Console admins", `${data.server.admins} active`],
             ["Version", `Salesman ${data.server.version} · Python ${data.server.python}`],
           ]} />
         </Card>
