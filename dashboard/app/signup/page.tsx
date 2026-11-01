@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Lock } from "lucide-react";
-import { getSite, register, type SiteStatus } from "@/lib/api";
+import { getSite, PREVIEW, register, type SiteStatus } from "@/lib/api";
 import { SALES_EMAIL } from "@/lib/plans";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,8 +20,12 @@ export default function SignupPage() {
   const [site, setSite] = useState<SiteStatus | null>(null);
 
   useEffect(() => {
+    if (PREVIEW) {
+      router.replace("/overview"); // preview mode: no sign-up
+      return;
+    }
     getSite().then(setSite);
-  }, []);
+  }, [router]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();

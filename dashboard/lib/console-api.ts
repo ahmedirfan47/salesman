@@ -1,6 +1,8 @@
 // dashboard\lib\console-api.ts
 // The Stonic Console talks to the same API as the business app, with its own
 // admin session. Business sign-ins and console sign-ins never share a token.
+import { reach } from "@/lib/api";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const TOKEN_KEY = "stonic_admin_token";
 export const CONSOLE_LOGIN = "/console/login";
@@ -51,7 +53,7 @@ async function failure(res: Response, fallback: string): Promise<never> {
 
 /** A request to the console API with the admin session. 401 goes back to the console sign-in page. */
 export async function consoleApi(path: string, options: RequestInit = {}) {
-  const res = await fetch(`${API_BASE}/api/v1${path}`, {
+  const res = await reach(`${API_BASE}/api/v1${path}`, {
     ...options,
     headers: { ...headers(true), ...(options.headers || {}) },
   });
@@ -63,7 +65,7 @@ export async function consoleApi(path: string, options: RequestInit = {}) {
 
 /** Download a file (invoice PDFs) with the admin session. */
 export async function consoleDownload(path: string, filename: string) {
-  const res = await fetch(`${API_BASE}/api/v1${path}`, { headers: headers(false) });
+  const res = await reach(`${API_BASE}/api/v1${path}`, { headers: headers(false) });
   if (res.status === 401) signedOut();
   if (!res.ok) await failure(res, "Download failed");
   const url = URL.createObjectURL(await res.blob());
@@ -77,7 +79,7 @@ export async function consoleDownload(path: string, filename: string) {
 }
 
 export async function consoleLogin(email: string, password: string): Promise<Admin> {
-  const res = await fetch(`${API_BASE}/api/v1/platform/auth/login`, {
+  const res = await reach(`${API_BASE}/api/v1/platform/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),

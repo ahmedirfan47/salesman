@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, getToken } from "@/lib/api";
+import { api, getToken, PREVIEW } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Printer, FileText } from "lucide-react";
@@ -36,6 +36,10 @@ export default function PrintingPage() {
   useEffect(load, []);
 
   function viewSlip(id: string) {
+    if (PREVIEW) {
+      setError("Downloads aren't available in the preview.");
+      return;
+    }
     fetch(`${API_BASE}/api/v1/printing/jobs/${id}/slip.pdf`, {
       headers: { Authorization: `Bearer ${getToken()}` },
     })
