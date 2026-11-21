@@ -1,10 +1,12 @@
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { colors, radius, spacing, typography } from "../theme/theme";
-import { INCLUDED_FEATURES, PRICING, formatMoney, quote } from "../data/plans";
+import { INCLUDED_FEATURES, PLANS, PlanKey, clampBranches, formatMoney, planByKey, quote } from "../data/plans";
 
 interface Props {
   branches: number;
   onBranchesChange: (n: number) => void;
+  plan: PlanKey;
+  onPlanChange: (p: PlanKey) => void;
 }
 
 function Check() {
@@ -29,35 +31,64 @@ function Stepper({ label, onPress, disabled }: { label: string; onPress: () => v
   );
 }
 
-/** The single Salesman plan: per-branch setup + monthly, with a live quote. */
-export function PlanCard({ branches, onBranchesChange }: Props) {
-  const q = quote(branches);
+/** Salesman's three plans, per-branch setup + monthly, with a live quote. */
+export function PlanCard({ branches, onBranchesChange, plan, onPlanChange }: Props) {
+  const p = planByKey(plan);
+  const q = quote(plan, branches);
+
+  function choose(key: PlanKey) {
+    onPlanChange(key);
+    const next = clampBranches(planByKey(key), branches);
+    if (next !== branches) onBranchesChange(next);
+  }
 
   return (
     <View style={styles.card}>
-      <Text style={styles.name}>Salesman</Text>
-      <Text style={styles.tagline}>One plan, priced per branch. Everything included.</Text>
+      <View style={styles.tabs}>
+        {PLANS.map((x) => (
+          <Pressable key={x.key} onPress={() => choose(x.key)} accessibilityRole="button"
+            accessibilityState={{ selected: x.key === plan }}
+            style={[styles.tab, x.key === plan && styles.tabActive]}>
+            <Text style={[styles.tabText, x.key === plan && styles.tabTextActive]}>{x.name}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <Text style={styles.name}>{p.name}</Text>
+      <Text style={styles.tagline}>{p.tagline}</Text>
 
       <View style={styles.priceGrid}>
         <View style={{ flex: 1 }}>
           <Text style={styles.priceLabel}>SETUP, PER BRANCH</Text>
-          <Text style={styles.price}>{formatMoney(PRICING.setupPerBranch)}</Text>
+          <Text style={styles.price}>{p.setupPerBranch === 0 ? "None" : formatMoney(p.setupPerBranch)}</Text>
           <Text style={styles.per}>one-time</Text>
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.priceLabel}>PER BRANCH</Text>
-          <Text style={styles.price}>{formatMoney(PRICING.monthlyPerBranch)}</Text>
+          <Text style={styles.price}>{formatMoney(p.monthlyPerBranch)}</Text>
           <Text style={styles.per}>per month</Text>
         </View>
+      </View>
+      <Text style={[styles.per, { marginTop: spacing.sm }]}>
+        {p.includedOrders === null
+          ? "Unlimited orders"
+          : `${p.includedOrders.toLocaleString("en-US")} orders per branch per month included, then ${formatMoney(p.overagePerOrder ?? 0)} each`}
+      </Text>
+      <View style={[styles.features, { marginTop: spacing.md }]}>
+        {p.features.map((f) => (
+          <View key={f} style={styles.featureRow}>
+            <Check />
+            <Text style={styles.featureText}>{f}</Text>
+          </View>
+        ))}
       </View>
 
       <View style={styles.divider} />
 
       <Text style={styles.branchLabel}>How many branches?</Text>
       <View style={styles.stepRow}>
-        <Stepper label="−" onPress={() => onBranchesChange(q.branches - 1)} disabled={q.branches <= 1} />
+        <Stepper label="−" onPress={() => onBranchesChange(q.branches - 1)} disabled={q.branches <= p.minBranches} />
         <Text style={styles.branchCount} accessibilityLiveRegion="polite">{q.branches}</Text>
-        <Stepper label="+" onPress={() => onBranchesChange(q.branches + 1)} disabled={q.branches >= PRICING.maxBranches} />
+        <Stepper label="+" onPress={() => onBranchesChange(q.branches + 1)} disabled={q.branches >= p.maxBranches} />
       </View>
 
       <View style={styles.quote}>
@@ -70,7 +101,7 @@ export function PlanCard({ branches, onBranchesChange }: Props) {
           <Text style={styles.quoteVal}>{formatMoney(q.monthly)}/mo</Text>
         </View>
         <View style={[styles.quoteRow, styles.quoteTotal]}>
-          <Text style={[styles.quoteKey, { color: colors.text, fontWeight: "600" }]}>First year total</Text>
+          <Text style={[styles.quoteKey, { color: colors.text, fontWeight: "600" }]}>{plan === "pilot" ? "Pilot total (60 days)" : "First year total"}</Text>
           <Text style={[styles.quoteVal, { fontSize: 17 }]}>{formatMoney(q.firstYear)}</Text>
         </View>
       </View>
@@ -90,6 +121,14 @@ export function PlanCard({ branches, onBranchesChange }: Props) {
 }
 
 const styles = StyleSheet.create({
+  tabs: { flexDirection: "row", gap: spacing.sm, marginBottom: spacing.md },
+  tab: {
+    flex: 1, paddingVertical: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border,
+    alignItems: "center", backgroundColor: colors.white,
+  },
+  tabActive: { borderColor: colors.accent, backgroundColor: colors.accentDim },
+  tabText: { ...typography.bodyMedium, color: colors.textMuted },
+  tabTextActive: { color: colors.accent, fontWeight: "700" },
   card: {
     backgroundColor: colors.white,
     borderRadius: radius.xl,

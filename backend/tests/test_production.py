@@ -291,7 +291,11 @@ async def test_seed_demo_builds_a_useful_dataset(db, client):
     quiet = (await client.get("/api/v1/analytics/drifting-customers", headers=_auth(demo))).json()
     assert {c["name"] for c in quiet} >= {"Al Waha Market", "Green Valley Store"}
     esc = (await client.get("/api/v1/orders/escalations/open", headers=_auth(demo))).json()
-    assert len(esc) == 1
+    assert sorted(e["reason_type"] for e in esc) == ["ai_review", "insufficient_stock"]
+    aliases = (await client.get("/api/v1/products/aliases", headers=_auth(demo))).json()
+    assert len(aliases) == 5
+    reminders = (await client.get("/api/v1/accounts/reminders", headers=_auth(demo))).json()
+    assert reminders and all(r["status"].startswith("sent") for r in reminders)
     pros = (await client.get("/api/v1/prospects", headers=_auth(demo))).json()
     assert sum(p["kind"] == "new" for p in pros) == 6
     assert {p["name"] for p in pros if p["kind"] == "winback"} == {"Al Waha Market", "Green Valley Store"}

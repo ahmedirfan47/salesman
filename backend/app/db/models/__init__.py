@@ -2,8 +2,10 @@
 from app.db.models.accounts import (
     AccountEntry, AccountSettings, CustomerPayment, DocumentCounter, PaymentAllocation, SalesInvoice,
 )
+from app.db.models.agent_settings import AgentSettings
 from app.db.models.billing import Invoice, Subscription
 from app.db.models.branch import Branch
+from app.db.models.collection_reminder import CollectionReminder
 from app.db.models.customer import Customer
 from app.db.models.conversation import Conversation
 from app.db.models.escalation import Escalation
@@ -19,6 +21,7 @@ from app.db.models.platform import AdminAuditLog, LoginEvent, PlatformAdmin, Pla
 from app.db.models.price_list import PriceList
 from app.db.models.print_job import PrintJob
 from app.db.models.product import Product
+from app.db.models.product_alias import ProductAlias
 from app.db.models.product_price import ProductPrice
 from app.db.models.prospect import Prospect, ProspectActivity
 from app.db.models.tenant import Tenant
@@ -35,4 +38,5 @@ __all__ = [
     "ZatcaUnit", "ZatcaDocument",
     "IntegrationConnection", "IntegrationLink", "IntegrationEvent",
     "PlatformAdmin", "PlatformSettings", "UserActivity", "LoginEvent", "AdminAuditLog",
+    "ProductAlias", "AgentSettings", "CollectionReminder",
 ]

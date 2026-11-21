@@ -74,13 +74,18 @@ async def run_once(session_factory: async_sessionmaker) -> bool:
 
 
 async def sweep(session_factory: async_sessionmaker) -> None:
-    """Periodic work: issue monthly invoices that have come due."""
+    """Periodic work: issue monthly invoices that have come due, and queue payment reminders."""
     from app.modules.billing.service import issue_due_invoices
+    from app.modules.collections.service import queue_all
 
     async with session_factory() as db:
         issued = await issue_due_invoices(db)
     if issued:
         logger.info("monthly invoices issued", extra={"ctx_count": issued})
+    async with session_factory() as db:
+        reminders = await queue_all(db)
+    if reminders:
+        logger.info("payment reminders queued", extra={"ctx_count": reminders})
 
 
 async def erp_tick(session_factory: async_sessionmaker) -> None:

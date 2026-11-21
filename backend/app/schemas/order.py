@@ -88,3 +88,14 @@ class OrderDetailOut(OrderOut):
 class OrderTransition(BaseModel):
     to_status: str
     note: str | None = None
+
+class CorrectedLine(BaseModel):
+    sku: str = Field(min_length=1, max_length=64)
+    quantity: int = Field(gt=0)
+    # the customer's words for this line; when set, the correction is remembered as an alias
+    wording: str | None = Field(default=None, max_length=200)
+
+
+class CorrectEscalation(BaseModel):
+    items: list[CorrectedLine] = Field(min_length=1, max_length=200)
+    note: str | None = Field(default=None, max_length=500)

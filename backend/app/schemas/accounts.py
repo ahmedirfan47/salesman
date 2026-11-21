@@ -30,6 +30,11 @@ class AccountSettingsIn(BaseModel):
     seller_city: str | None = Field(default=None, max_length=127)
     seller_postal_code: str | None = Field(default=None, max_length=10)
     invoice_footer: str | None = Field(default=None, max_length=2000)
+    reminders_enabled: bool | None = None
+    reminder_days_before_due: int | None = Field(default=None, ge=0, le=30)
+    reminder_repeat_days: int | None = Field(default=None, ge=1, le=60)
+    reminder_max_overdue: int | None = Field(default=None, ge=0, le=12)
+    reminder_template: str | None = Field(default=None, max_length=120)
 
 
 class AccountSettingsOut(BaseModel):
@@ -55,6 +60,11 @@ class AccountSettingsOut(BaseModel):
     seller_city: str | None
     seller_postal_code: str | None
     invoice_footer: str | None
+    reminders_enabled: bool = False
+    reminder_days_before_due: int = 3
+    reminder_repeat_days: int = 7
+    reminder_max_overdue: int = 3
+    reminder_template: str | None = None
 
 
 # ---- customer credit ----
@@ -278,3 +288,17 @@ class CustomerAccountOut(BaseModel):
     own_payment_terms_days: int | None
     invoices: list[SalesInvoiceOut]
     payments: list[PaymentOut]
+
+class CollectionReminderOut(BaseModel):
+    id: uuid.UUID
+    invoice_number: str
+    customer_name: str | None
+    stage: str
+    status: str
+    detail: str | None
+    created_at: datetime
+    sent_at: datetime | None
+
+
+class RemindersRunOut(BaseModel):
+    queued: int

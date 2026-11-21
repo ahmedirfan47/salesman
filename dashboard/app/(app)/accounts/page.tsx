@@ -6,8 +6,8 @@ import { api, downloadFile } from "@/lib/api";
 import { useMe, can } from "@/lib/use-me";
 import { useAllBranchesView, useBranches } from "@/lib/branches";
 import {
-  AGING_LABELS, AccountRow, AccountSettings, AccountTotals, KIND_LABEL, METHOD_LABEL, Payment, SalesInvoice,
-  accountFlags, day, invoiceBadge, money,
+  AGING_LABELS, AccountRow, AccountSettings, AccountTotals, CollectionReminder, KIND_LABEL, METHOD_LABEL, Payment,
+  REMINDER_STATUS, SalesInvoice, accountFlags, day, invoiceBadge, money, reminderStage,
 } from "@/lib/accounts";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -421,6 +421,43 @@ function Settings() {
       </Card>
 
       <Card className="p-5 lg:col-span-2">
+        <h2 className="mb-1 text-sm font-semibold text-slate-500">PAYMENT REMINDERS ON WHATSAPP</h2>
+        <p className="mb-4 text-xs text-slate-500">
+          Customers with a WhatsApp number get a reminder before an invoice is due and after it goes overdue,
+          between 09:00 and 21:00. They can reply to ask for a statement, and the AI sends it.
+        </p>
+        <div className="space-y-3 text-sm">
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={s.reminders_enabled} onChange={(e) => set({ reminders_enabled: e.target.checked })} />
+            Send payment reminders
+          </label>
+          {s.reminders_enabled && (
+            <>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <Field label="Days before the due date (0 = none)">
+                  <Input type="number" min={0} max={30} value={s.reminder_days_before_due} onChange={(e) => set({ reminder_days_before_due: Number(e.target.value) })} />
+                </Field>
+                <Field label="When overdue, remind every (days)">
+                  <Input type="number" min={1} max={60} value={s.reminder_repeat_days} onChange={(e) => set({ reminder_repeat_days: Number(e.target.value) })} />
+                </Field>
+                <Field label="Overdue reminders per invoice (max)">
+                  <Input type="number" min={0} max={12} value={s.reminder_max_overdue} onChange={(e) => set({ reminder_max_overdue: Number(e.target.value) })} />
+                </Field>
+              </div>
+              <Field label="WhatsApp template name (for customers who haven't messaged in 24 hours)">
+                <Input value={s.reminder_template ?? ""} placeholder="e.g. payment_reminder" onChange={(e) => set({ reminder_template: e.target.value })} />
+              </Field>
+              <p className="text-xs text-slate-500">
+                Submit a Utility template in Meta with 4 parameters: customer name, invoice number, amount due, due date.
+                Without one, reminders only reach customers who messaged you in the last 24 hours.
+              </p>
+            </>
+          )}
+          <Reminders />
+        </div>
+      </Card>
+
+      <Card className="p-5 lg:col-span-2">
         <h2 className="mb-4 text-sm font-semibold text-slate-500">SELLER DETAILS ON INVOICES AND STATEMENTS</h2>
         <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
           <Field label="Business name"><Input value={s.seller_name ?? ""} onChange={(e) => set({ seller_name: e.target.value })} /></Field>
@@ -452,6 +489,57 @@ function Settings() {
         {msg && <span className="text-sm text-emerald-700">{msg}</span>}
         {error && <span className="text-sm text-red-600">{error}</span>}
       </div>
+    </div>
+  );
+}
+
+function Reminders() {
+  const [rows, setRows] = useState<CollectionReminder[] | null>(null);
+  const [note, setNote] = useState("");
+  const load = () => api("/accounts/reminders").then(setRows).catch(() => setRows([]));
+  useEffect(() => { load(); }, []);
+  async function runNow() {
+    setNote("");
+    try {
+      const r = await api("/accounts/reminders/run", { method: "POST" });
+      setNote(r.queued ? `${r.queued} reminder${r.queued === 1 ? "" : "s"} queued.` : "Nothing due right now (or outside 09:00–21:00).");
+      load();
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : "Failed");
+    }
+  }
+  return (
+    <div className="border-t border-[var(--border)] pt-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <span className="text-xs font-medium text-slate-500">Latest reminders</span>
+        <Button variant="outline" onClick={runNow}>Check now</Button>
+      </div>
+      {note && <p className="mb-2 text-xs text-slate-600">{note}</p>}
+      {rows === null ? <p className="text-xs text-slate-400">Loading…</p> : rows.length === 0 ? (
+        <p className="text-xs text-slate-400">No reminders yet.</p>
+      ) : (
+        <TableScroll>
+          <table className="w-full min-w-[560px] text-xs">
+            <thead className="text-left text-slate-500">
+              <tr><th className="py-1.5 font-medium">Customer</th><th className="font-medium">Invoice</th>
+                <th className="font-medium">Reminder</th><th className="font-medium">Status</th><th className="font-medium">When</th></tr>
+            </thead>
+            <tbody>
+              {rows.slice(0, 20).map((r) => (
+                <tr key={r.id} className="border-t border-[var(--border)]">
+                  <td className="py-1.5">{r.customer_name ?? "—"}</td>
+                  <td className="font-mono">{r.invoice_number}</td>
+                  <td>{reminderStage(r.stage)}</td>
+                  <td title={r.detail ?? undefined} className={r.status === "skipped" ? "text-amber-700" : ""}>
+                    {REMINDER_STATUS[r.status] ?? r.status}{r.detail ? ` — ${r.detail}` : ""}
+                  </td>
+                  <td className="text-slate-500">{new Date(r.sent_at ?? r.created_at).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableScroll>
+      )}
     </div>
   );
 }

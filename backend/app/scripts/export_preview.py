@@ -41,6 +41,7 @@ STATIC = [
     "/prospects", "/prospects/summary",
     "/zatca", "/zatca/documents",
     "/integrations", "/integrations/options", "/integrations/balances", "/integrations/events",
+    "/products/aliases", "/agent/settings", "/accounts/reminders",
 ]
 
 

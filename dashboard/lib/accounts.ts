@@ -125,7 +125,37 @@ export type AccountSettings = {
   seller_city: string | null;
   seller_postal_code: string | null;
   invoice_footer: string | null;
+  reminders_enabled: boolean;
+  reminder_days_before_due: number;
+  reminder_repeat_days: number;
+  reminder_max_overdue: number;
+  reminder_template: string | null;
 };
+
+/** One WhatsApp payment reminder: sent, skipped (with the reason) or queued. */
+export type CollectionReminder = {
+  id: string;
+  invoice_number: string;
+  customer_name: string | null;
+  stage: string;
+  status: "queued" | "sent_text" | "sent_template" | "skipped";
+  detail: string | null;
+  created_at: string;
+  sent_at: string | null;
+};
+
+export const REMINDER_STATUS: Record<CollectionReminder["status"], string> = {
+  queued: "Waiting to send",
+  sent_text: "Sent",
+  sent_template: "Sent (template)",
+  skipped: "Skipped",
+};
+
+export function reminderStage(stage: string): string {
+  if (stage === "due_soon") return "Due soon";
+  const n = stage.startsWith("overdue_") ? stage.slice(8) : "";
+  return n ? `Overdue, reminder ${n}` : stage;
+}
 
 /** A customer's tax registration and national address (B2B e-invoices need them). */
 export type TaxDetails = {

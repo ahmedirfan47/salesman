@@ -12,16 +12,18 @@ import uuid
 from dataclasses import dataclass
 from datetime import timedelta
 
+from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.customer import Customer
 from app.db.models.escalation import Escalation
-from app.db.models.product import Product
 from app.db.models.tenant import Tenant
 from app.jobs.queue import WHATSAPP_SEND_DOCUMENT, enqueue
 from app.modules.accounts import service as accounts
+from app.modules.orders import review as order_review
 from app.modules.orders import service as orders_service
+from app.modules.products import matching
 from app.modules.pricing import service as pricing_service
 from app.schemas.order import OrderCreate, OrderItemIn
 
@@ -31,12 +33,14 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "search_products",
-            "description": "Search the catalog by name or keyword to find a product's SKU. "
-                           "Use this when the customer names a product but not its code.",
+            "description": "Find the product a customer means, from their own words (any spelling, Arabic or "
+                           "English, nicknames they have used before). Returns the best matches with a match "
+                           "score from 0 to 1. Use this whenever the customer names a product but not its SKU. "
+                           "Pass the customer's words as they wrote them, one product per call.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "product name or keyword"}
+                    "query": {"type": "string", "description": "the customer's words for ONE product"}
                 },
                 "required": ["query"],
             },
@@ -72,6 +76,12 @@ TOOL_SCHEMAS = [
                             "properties": {
                                 "sku": {"type": "string"},
                                 "quantity": {"type": "integer"},
+                                "customer_wording": {
+                                    "type": "string",
+                                    "description": "the customer's own words for this product, exactly as "
+                                                   "they wrote or said them (e.g. 'حليب صغير', 'the red one'). "
+                                                   "Leave empty only when they gave the SKU.",
+                                },
                             },
                             "required": ["sku", "quantity"],
                         },
@@ -80,6 +90,16 @@ TOOL_SCHEMAS = [
                 },
                 "required": ["items"],
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_my_order_history",
+            "description": "Get this customer's last orders and the items they usually buy, with typical "
+                           "quantities. Use it when they say 'same as last time', 'the usual', 'repeat my "
+                           "order', 'نفس الطلب', or ask what they ordered before.",
+            "parameters": {"type": "object", "properties": {}},
         },
     },
     {
@@ -133,23 +153,33 @@ class ToolContext:
 
 
 # ---- implementations ----
-async def _search_products(db: AsyncSession, tenant_id: uuid.UUID, query: str) -> dict:
-    like = f"%{query.strip()}%"
-    rows = await db.scalars(
-        select(Product)
-        .where(
-            Product.tenant_id == tenant_id,
-            Product.is_active.is_(True),
-            (Product.name_en.ilike(like))
-            | (Product.name_ar.ilike(like))
-            | (Product.sku.ilike(like)),
-        )
-        .limit(10)
+async def _search_products(db: AsyncSession, ctx: ToolContext, query: str) -> dict:
+    customer = await _known_customer(db, ctx)
+    matches = await matching.find_matches(
+        db, ctx.tenant_id, query, customer_id=customer.id if customer else None, limit=6,
     )
-    products = [{"sku": p.sku, "name_en": p.name_en, "name_ar": p.name_ar} for p in rows]
-    if not products:
-        return {"found": False, "message": f"No products match '{query}'."}
-    return {"found": True, "products": products}
+    if not matches:
+        return {"found": False, "message": f"No products match '{query}'. Ask the customer to describe it differently."}
+    products = [
+        {
+            "sku": m["product"].sku,
+            "name_en": m["product"].name_en,
+            "name_ar": m["product"].name_ar,
+            "match_score": m["score"],
+            "matched_by": m["via"],
+        }
+        for m in matches
+    ]
+    top = products[0]["match_score"]
+    close = [p for p in products[1:] if top - p["match_score"] < 0.08]
+    if top >= 0.9 and not close:
+        advice = "Clear match."
+    elif top >= 0.6:
+        advice = "Likely match. If two options are close, ask the customer which one they mean."
+    else:
+        advice = "Weak match. Show the customer the top options and ask them to choose."
+    await db.commit()
+    return {"found": True, "products": products, "advice": advice}
 
 
 async def _get_price_and_stock(db: AsyncSession, ctx: ToolContext, sku: str) -> dict:
@@ -184,30 +214,62 @@ async def _place_order(
     # Link the order to the customer on file (zone, delivery driver, order updates)
     # and to the branch the customer contacted.
     customer = await _known_customer(db, ctx)
-    order = await orders_service.create_order(
-        db,
-        ctx.tenant_id,
-        OrderCreate(
-            items=[OrderItemIn(sku=i["sku"], quantity=int(i["quantity"])) for i in items],
-            customer_id=customer.id if customer else None,
-            customer_name=customer_name or (customer.name if customer else None),
-            whatsapp_number=ctx.customer_number,
-            branch_id=ctx.branch_id,
-        ),
+    digits = re.sub(r"\D", "", ctx.customer_number or "")
+    items = [i for i in items if i.get("sku") and int(i.get("quantity") or 0) > 0]
+    if not items:
+        return {"error": "No items with a SKU and a quantity above zero."}
+
+    # check the AI's choices before anything is confirmed
+    lines, review = await order_review.assess_ai_order(
+        db, ctx.tenant_id, items, customer=customer, number_digits=digits,
     )
+    try:
+        order = await orders_service.create_order(
+            db,
+            ctx.tenant_id,
+            OrderCreate(
+                items=[OrderItemIn(sku=line["sku"], quantity=line["quantity"]) for line in lines],
+                customer_id=customer.id if customer else None,
+                customer_name=customer_name or (customer.name if customer else None),
+                whatsapp_number=ctx.customer_number,
+                branch_id=ctx.branch_id,
+            ),
+            review=review,
+            ai_lines=[
+                {"sku": line["sku"], "quantity": line["quantity"], "wording": line["wording"], "score": line["score"]}
+                for line in lines
+            ],
+        )
+    except HTTPException as exc:
+        await db.rollback()
+        return {"error": str(exc.detail), "placed": False}
+
     review_reason = None
     if order.status == "requires_human_review":
         reason = await db.scalar(select(Escalation.reason_type).where(Escalation.order_id == order.id))
-        review_reason = "account" if reason == "credit" else "stock"
+        review_reason = {"credit": "account", "ai_review": "checking_items"}.get(reason, "stock")
+    elif review == []:
+        # confirmed with the customer's own words: remember them for next time
+        await order_review.learn_from_confirmed(db, ctx.tenant_id, lines, customer)
     return {
         "order_number": order.order_number,
         "status": order.status,
         "total_amount": float(order.total_amount),
         "currency": order.currency,
         "needs_human_review": order.status == "requires_human_review",
-        # "stock": checking availability; "account": the team must approve the order on their account
+        # "stock": checking availability; "account": the team must approve the order on their account;
+        # "checking_items": the team is confirming the products or quantities
         "review_reason": review_reason,
     }
+
+
+async def _get_my_order_history(db: AsyncSession, ctx: ToolContext) -> dict:
+    customer = await _known_customer(db, ctx)
+    digits = re.sub(r"\D", "", ctx.customer_number or "")
+    memory = await order_review.order_memory(db, ctx.tenant_id, customer, digits)
+    if not memory["has_history"]:
+        return {"has_history": False, "message": "No earlier orders from this number."}
+    return memory
 
 
 _NOT_REGISTERED = {
@@ -292,11 +354,13 @@ async def _send_invoice_copy(db: AsyncSession, ctx: ToolContext, number: str, la
 async def dispatch(db: AsyncSession, ctx: ToolContext, name: str, args: dict) -> dict:
     """Route a tool call from the model to the matching implementation."""
     if name == "search_products":
-        return await _search_products(db, ctx.tenant_id, args.get("query", ""))
+        return await _search_products(db, ctx, args.get("query", ""))
     if name == "get_price_and_stock":
         return await _get_price_and_stock(db, ctx, args.get("sku", ""))
     if name == "place_order":
         return await _place_order(db, ctx, args.get("items", []), args.get("customer_name"))
+    if name == "get_my_order_history":
+        return await _get_my_order_history(db, ctx)
     if name == "get_my_account":
         return await _get_my_account(db, ctx)
     if name == "send_my_statement":

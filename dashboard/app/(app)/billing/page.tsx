@@ -79,6 +79,8 @@ function NotSubscribed() {
   );
 }
 
+const PLAN_NAME: Record<string, string> = { pilot: "Pilot", growth: "Growth", enterprise: "Enterprise", custom: "Custom" };
+
 function Subscribed({ data, setError }: { data: Billing; setError: (s: string) => void }) {
   const sub = data.subscription!;
   const acct = data.account;
@@ -132,8 +134,15 @@ function Subscribed({ data, setError }: { data: Billing; setError: (s: string) =
         <Card className="p-5">
           <h2 className="mb-3 text-sm font-semibold text-slate-500">YOUR PLAN</h2>
           <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+            <Row label="Plan" value={PLAN_NAME[sub.plan] ?? "Custom"} />
             <Row label="Setup, per branch" value={money(sub.currency, sub.setup_fee_per_branch)} />
             <Row label="Monthly, per branch" value={money(sub.currency, sub.monthly_fee_per_branch)} />
+            <Row label="Orders included" value={sub.included_orders_per_branch == null
+              ? "Unlimited"
+              : `${sub.included_orders_per_branch.toLocaleString("en-US")} per branch per month`} />
+            {sub.overage_per_order != null && (
+              <Row label="Each order above that" value={money(sub.currency, sub.overage_per_order)} />
+            )}
             <Row label="VAT" value={Number(sub.tax_percent) > 0 ? `${Number(sub.tax_percent)}%` : "Not charged"} />
             <Row label="Payment terms" value={`${sub.payment_terms_days} days`} />
             <Row label="Billed to" value={sub.billing_name ?? "—"} />

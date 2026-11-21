@@ -21,6 +21,9 @@ from app.main import app
 from app.modules.billing import service as billing
 from app.modules.billing.pdf import render_invoice_pdf
 
+# the per-branch USD pricing these tests were written against (now a "custom" plan)
+LEGACY = {"currency": "USD", "setup_fee_per_branch": Decimal("11000"), "monthly_fee_per_branch": Decimal("1050")}
+
 
 @pytest_asyncio.fixture
 async def client(db):
@@ -83,7 +86,7 @@ def test_add_months_keeps_the_day_or_uses_the_last_day():
 
 async def test_setup_fee_is_invoiced_once_per_branch(db):
     t = await _tenant(db, branches=2)
-    await billing.upsert_subscription(db, t.id, {"next_invoice_on": date(2026, 11, 1)}, on=date(2026, 10, 26))
+    await billing.upsert_subscription(db, t.id, {**LEGACY, "next_invoice_on": date(2026, 11, 1)}, on=date(2026, 10, 26))
 
     inv = await billing.issue_setup_invoice(db, t.id, on=date(2026, 10, 26))
     assert inv.kind == "setup" and inv.total == Decimal("22000.00") and inv.currency == "USD"
@@ -108,7 +111,7 @@ async def test_setup_fee_is_invoiced_once_per_branch(db):
 
 async def test_monthly_invoices_are_issued_on_their_date_and_never_twice(db):
     t = await _tenant(db, branches=2)
-    await billing.upsert_subscription(db, t.id, {"next_invoice_on": date(2026, 11, 1), "tax_percent": Decimal("15")})
+    await billing.upsert_subscription(db, t.id, {**LEGACY, "next_invoice_on": date(2026, 11, 1), "tax_percent": Decimal("15")})
 
     assert await billing.issue_due_invoices(db, on=date(2026, 10, 31)) == 0
     assert await billing.issue_due_invoices(db, on=date(2026, 11, 1)) == 1
@@ -125,8 +128,8 @@ async def test_monthly_invoices_are_issued_on_their_date_and_never_twice(db):
 async def test_missed_months_are_caught_up_and_paused_subscriptions_skipped(db):
     t = await _tenant(db)
     paused = await _tenant(db, "Paused Co")
-    await billing.upsert_subscription(db, t.id, {"next_invoice_on": date(2026, 11, 1)})
-    await billing.upsert_subscription(db, paused.id, {"next_invoice_on": date(2026, 11, 1), "status": "paused"})
+    await billing.upsert_subscription(db, t.id, {**LEGACY, "next_invoice_on": date(2026, 11, 1)})
+    await billing.upsert_subscription(db, paused.id, {**LEGACY, "next_invoice_on": date(2026, 11, 1), "status": "paused"})
 
     assert await billing.issue_due_invoices(db, on=date(2027, 1, 15)) == 3  # Nov, Dec, Jan
     periods = list(await db.scalars(select(Invoice.period_start).where(Invoice.tenant_id == t.id).order_by(Invoice.period_start)))
@@ -138,7 +141,7 @@ async def test_worker_sweep_issues_due_invoices(db):
     from app.jobs import worker
 
     t = await _tenant(db)
-    await billing.upsert_subscription(db, t.id, {"next_invoice_on": billing.today()})
+    await billing.upsert_subscription(db, t.id, {**LEGACY, "next_invoice_on": billing.today()})
 
     class _Ctx:
         async def __aenter__(self):
@@ -155,7 +158,7 @@ async def test_worker_sweep_issues_due_invoices(db):
 
 async def test_account_state_moves_from_open_to_overdue_to_read_only(db):
     t = await _tenant(db)
-    await billing.upsert_subscription(db, t.id, {"next_invoice_on": date(2026, 11, 1), "payment_terms_days": 10,
+    await billing.upsert_subscription(db, t.id, {**LEGACY, "next_invoice_on": date(2026, 11, 1), "payment_terms_days": 10,
                                                  "grace_days": 14})
     await billing.issue_due_invoices(db, on=date(2026, 11, 1))  # due 11 Nov, read-only from 26 Nov
 
@@ -177,7 +180,7 @@ async def test_account_state_moves_from_open_to_overdue_to_read_only(db):
 
 async def _overdue_tenant(db, *, days_late=30):
     t = await _tenant(db)
-    await billing.upsert_subscription(db, t.id, {"next_invoice_on": billing.today() - timedelta(days=days_late + 14)})
+    await billing.upsert_subscription(db, t.id, {**LEGACY, "next_invoice_on": billing.today() - timedelta(days=days_late + 14)})
     inv = await billing.issue_next_monthly(db, t.id, on=billing.today() - timedelta(days=days_late + 14))
     return t, inv
 
@@ -214,7 +217,7 @@ async def test_billing_page_shows_invoices_and_bank_details(db, client):
     r = (await client.get("/api/v1/billing", headers=_auth(owner))).json()
     assert r["subscription"] is None and r["invoices"] == [] and r["account"]["state"] == "ok"
 
-    await billing.upsert_subscription(db, t.id, {"next_invoice_on": billing.today()})
+    await billing.upsert_subscription(db, t.id, {**LEGACY, "next_invoice_on": billing.today()})
     r = (await client.get("/api/v1/billing", headers=_auth(owner))).json()  # issues today's invoice on the way
     assert len(r["invoices"]) == 1 and r["invoices"][0]["total"] == "2100.00"
     assert r["account"]["state"] == "open" and r["active_branches"] == 2 and r["unbilled_setup_branches"] == 2
@@ -246,14 +249,15 @@ async def test_console_sets_up_and_bills_a_business(db, client):
 
     r = await client.put(f"/api/v1/platform/tenants/{customer.id}/subscription", headers=h, json={
         "next_invoice_on": str(billing.today() + timedelta(days=5)), "billing_name": "Al Rayyan Fresh Trading Co.",
-        "billing_tax_id": "300000000000003", "tax_percent": "15", "currency": "sar",
+        "billing_tax_id": "300000000000003", "tax_percent": "15", "currency": "sar", "plan": "growth",
     })
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["subscription"]["currency"] == "SAR" and body["unbilled_setup_branches"] == 3
+    assert body["subscription"]["plan"] == "growth"
 
     setup = await client.post(f"/api/v1/platform/tenants/{customer.id}/invoices/setup", headers=h, json={})
-    assert setup.status_code == 201 and setup.json()["total"] == "37950.00"  # 3 x 11,000 + 15% VAT
+    assert setup.status_code == 201 and setup.json()["total"] == "25875.00"  # 3 x 7,500 + 15% VAT
     nxt = await client.post(f"/api/v1/platform/tenants/{customer.id}/invoices/next", headers=h)
     assert nxt.status_code == 201 and nxt.json()["kind"] == "subscription"
     custom = await client.post(f"/api/v1/platform/tenants/{customer.id}/invoices", headers=h, json={
@@ -298,9 +302,9 @@ def test_invoice_pdf_renders_arabic_names_without_crashing():
 
 async def test_moving_the_invoice_date_back_never_bills_a_period_twice(db):
     t = await _tenant(db)
-    await billing.upsert_subscription(db, t.id, {"next_invoice_on": date(2026, 11, 1)})
+    await billing.upsert_subscription(db, t.id, {**LEGACY, "next_invoice_on": date(2026, 11, 1)})
     assert await billing.issue_due_invoices(db, on=date(2026, 12, 5)) == 2  # Nov, Dec
-    await billing.upsert_subscription(db, t.id, {"next_invoice_on": date(2026, 11, 1)})
+    await billing.upsert_subscription(db, t.id, {**LEGACY, "next_invoice_on": date(2026, 11, 1)})
     assert await billing.issue_due_invoices(db, on=date(2026, 12, 5)) == 0
     inv = await billing.issue_next_monthly(db, t.id, on=date(2026, 12, 5))
     assert inv.period_start == date(2027, 1, 1)

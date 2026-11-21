@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TableScroll } from "@/components/table-scroll";
+import { CURRENCY, PLANS, PlanKey, planByKey } from "@/lib/plans";
 import { Download, Plus, RefreshCw, Trash2, X } from "lucide-react";
 
 type TenantRow = {
@@ -23,18 +24,41 @@ type TenantRow = {
 type TenantDetail = TenantRow & { invoices: Invoice[] };
 
 type SubForm = {
-  status: string; currency: string; setup_fee_per_branch: string; monthly_fee_per_branch: string;
+  status: string; plan: PlanKey | "custom"; currency: string; setup_fee_per_branch: string; monthly_fee_per_branch: string;
+  included_orders_per_branch: string; overage_per_order: string;
   tax_percent: string; payment_terms_days: string; grace_days: string; next_invoice_on: string;
   billing_name: string; billing_address: string; billing_tax_id: string; billing_email: string; notes: string;
 };
 
+/** The plan's prices, as form values (a new subscription starts on the pilot plan). */
+function planFields(key: PlanKey) {
+  const p = planByKey(key);
+  return {
+    currency: CURRENCY,
+    setup_fee_per_branch: String(p.setupPerBranch),
+    monthly_fee_per_branch: String(p.monthlyPerBranch),
+    included_orders_per_branch: p.includedOrders == null ? "" : String(p.includedOrders),
+    overage_per_order: p.overagePerOrder == null ? "" : p.overagePerOrder.toFixed(2),
+  };
+}
+
 function toForm(t: TenantDetail): SubForm {
   const s = t.subscription;
+  if (!s) {
+    return {
+      status: "active", plan: "pilot", ...planFields("pilot"), tax_percent: "0", payment_terms_days: "14",
+      grace_days: "14", next_invoice_on: new Date().toISOString().slice(0, 10), billing_name: t.name,
+      billing_address: "", billing_tax_id: "", billing_email: "", notes: "",
+    };
+  }
   return {
-    status: s?.status ?? "active",
-    currency: s?.currency ?? "USD",
-    setup_fee_per_branch: s?.setup_fee_per_branch ?? "11000",
-    monthly_fee_per_branch: s?.monthly_fee_per_branch ?? "1050",
+    status: s.status,
+    plan: (s.plan ?? "custom") as SubForm["plan"],
+    currency: s.currency,
+    setup_fee_per_branch: s.setup_fee_per_branch,
+    monthly_fee_per_branch: s.monthly_fee_per_branch,
+    included_orders_per_branch: s.included_orders_per_branch == null ? "" : String(s.included_orders_per_branch),
+    overage_per_order: s.overage_per_order ?? "",
     tax_percent: s?.tax_percent ?? "0",
     payment_terms_days: String(s?.payment_terms_days ?? 14),
     grace_days: String(s?.grace_days ?? 14),
@@ -149,8 +173,18 @@ function TenantPanel({ tenantId, onChanged, onClose }: { tenantId: string; onCha
 
   function save() {
     const f = form!;
+    const { setup_fee_per_branch, monthly_fee_per_branch, included_orders_per_branch, overage_per_order, ...rest } = f;
+    // a published plan sends only its name (the server fills in its prices); a custom plan sends the prices
+    const prices = f.plan === "custom"
+      ? {
+          setup_fee_per_branch, monthly_fee_per_branch,
+          included_orders_per_branch: included_orders_per_branch.trim() === "" ? null : Number(included_orders_per_branch),
+          overage_per_order: overage_per_order.trim() === "" ? null : overage_per_order,
+        }
+      : {};
     const body = {
-      ...f,
+      ...rest,
+      ...prices,
       currency: f.currency.toUpperCase(),
       payment_terms_days: Number(f.payment_terms_days),
       grace_days: Number(f.grace_days),
@@ -190,9 +224,23 @@ function TenantPanel({ tenantId, onChanged, onClose }: { tenantId: string; onCha
             <option value="cancelled">Cancelled</option>
           </select>
         </label>
+        <label className="block text-xs font-medium text-slate-500">
+          Plan
+          <select value={form.plan}
+            onChange={(e) => {
+              const plan = e.target.value as SubForm["plan"];
+              setForm(plan === "custom" ? { ...form, plan } : { ...form, plan, ...planFields(plan) });
+            }}
+            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm">
+            {PLANS.map((p) => <option key={p.key} value={p.key}>{p.name}</option>)}
+            <option value="custom">Custom (set prices by hand)</option>
+          </select>
+        </label>
         {field("currency", "Currency", { maxLength: 3 })}
-        {field("setup_fee_per_branch", "Setup fee per branch", { inputMode: "decimal" })}
-        {field("monthly_fee_per_branch", "Monthly fee per branch", { inputMode: "decimal" })}
+        {field("setup_fee_per_branch", "Setup fee per branch", { inputMode: "decimal", disabled: form.plan !== "custom" })}
+        {field("monthly_fee_per_branch", "Monthly fee per branch", { inputMode: "decimal", disabled: form.plan !== "custom" })}
+        {field("included_orders_per_branch", "Orders included per branch/month (empty = unlimited)", { inputMode: "numeric", disabled: form.plan !== "custom" })}
+        {field("overage_per_order", "Fee per extra order", { inputMode: "decimal", disabled: form.plan !== "custom" })}
         {field("tax_percent", "VAT %", { inputMode: "decimal" })}
         {field("payment_terms_days", "Payment terms (days)", { inputMode: "numeric" })}
         {field("grace_days", "Grace before read-only (days)", { inputMode: "numeric" })}
@@ -208,7 +256,8 @@ function TenantPanel({ tenantId, onChanged, onClose }: { tenantId: string; onCha
           className="mt-1 w-full rounded-lg border border-[var(--border)] px-3 py-2 text-sm outline-none focus:border-[var(--primary)]" />
       </label>
       <p className="mt-2 text-xs text-slate-400">
-        Fee changes apply to invoices issued from now on. A next-invoice date in the past issues the missed months at once.
+        Fee changes apply to invoices issued from now on. Orders above the included number are billed on the next
+        monthly invoice. A next-invoice date in the past issues the missed months at once.
       </p>
       <div className="mt-4 flex flex-wrap gap-2">
         <Button onClick={save} disabled={busy}>{t.subscription ? "Save subscription" : "Start subscription"}</Button>

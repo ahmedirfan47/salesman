@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import UserRole
@@ -314,6 +314,7 @@ async def seed(db: AsyncSession, email: str, password: str, *, reset: bool = Fal
     await _seed_prospects(db, tid, rep, zones, now)
     await _seed_accounts(db, tid, now)
     await _seed_einvoicing(db, tid, rid, now)
+    await _seed_intelligence(db, tid, rid, now)
     return tenant
 
 
@@ -450,6 +451,72 @@ B2B_CUSTOMERS = {
     "Riyadh Fresh Mart": dict(cr_number="1010456789", street="Olaya St", building_number="3150",
                               district="Al Olaya", city="Riyadh", postal_code="12214"),
 }
+
+
+async def _seed_intelligence(db: AsyncSession, tid, rid, now: datetime) -> None:
+    """Words customers use for products, the AI's order checks, one order the AI wasn't
+    sure about, and payment reminders already sent to the late payers."""
+    from app.db.models.collection_reminder import CollectionReminder
+    from app.db.models.product_alias import ProductAlias
+    from app.modules.accounts import service as accounts
+    from app.modules.orders import review
+    from app.modules.products.matching import normalise
+
+    products = {p.sku: p for p in await db.scalars(select(Product).where(Product.tenant_id == tid))}
+    customers = {c.name: c for c in await db.scalars(select(Customer).where(Customer.tenant_id == tid))}
+    noor, waha = customers.get("Al Noor Grocery"), customers.get("Al Waha Market")
+    aliases = [
+        ("TOM-5", None, "طماطم كرتون", "manual", 41),
+        ("ONI-10", None, "بصل كيس", "manual", 23),
+        ("MAN-4", None, "mango box", "learned", 17),
+        ("TOM-5", noor, "the usual red ones", "correction", 9),
+        ("CUC-5", waha, "خيار صغير", "learned", 12),
+    ]
+    for sku, customer, words, source, hits in aliases:
+        if sku in products:
+            db.add(ProductAlias(tenant_id=tid, product_id=products[sku].id, customer_id=customer.id if customer else None,
+                                alias=words, alias_norm=normalise(words), source=source, hits=hits,
+                                last_used_at=now - timedelta(hours=hits)))
+    await review.get_settings(db, tid)
+
+    # an order the AI held because the customer's words didn't clearly name the product
+    order_count = await db.scalar(select(func.count(Order.id)).where(Order.tenant_id == tid))
+    pot = products.get("POT-10")
+    if noor and pot:
+        price = await db.scalar(select(ProductPrice.unit_price).where(
+            ProductPrice.product_id == pot.id, ProductPrice.branch_id == rid, ProductPrice.effective_to.is_(None)))
+        price = price or Decimal("20")
+        num = f"ORD-{(order_count or 0) + 1:05d}"
+        held = Order(tenant_id=tid, branch_id=rid, order_number=num, customer_id=noor.id, customer_name=noor.name,
+                     customer_company=noor.company, whatsapp_number=noor.whatsapp_number,
+                     status="requires_human_review", currency=CURRENCY, zone_id=noor.zone_id,
+                     total_amount=price * 15, created_at=now - timedelta(minutes=12))
+        db.add(held)
+        await db.flush()
+        db.add(OrderItem(tenant_id=tid, order_id=held.id, product_id=pot.id, sku="POT-10", product_name=pot.name_en,
+                         quantity=15, unit_price=price, line_total=price * 15))
+        msg = '"the big brown sacks" may not be Potatoes 10 kg (POT-10); match 34%'
+        db.add(Escalation(tenant_id=tid, branch_id=rid, reason_type="ai_review",
+                          context={"order_number": num, "shortfalls": [], "credit": [],
+                                   "review": [{"kind": "low_confidence", "sku": "POT-10", "wording": "the big brown sacks",
+                                               "score": 0.34, "message": msg}],
+                                   "lines": [{"sku": "POT-10", "quantity": 15, "wording": "the big brown sacks",
+                                              "score": 0.34}]},
+                          ai_recommendation=f"Check the AI's order -> {msg}. Correct the items if needed, then approve, or reject.",
+                          order_id=held.id, customer_name=noor.name, whatsapp_number=noor.whatsapp_number,
+                          status="open", created_at=now - timedelta(minutes=12)))
+
+    # payment reminders: switched on, and already sent to the customers running late
+    await accounts.update_settings(db, tid, {"reminders_enabled": True, "reminder_template": "payment_reminder"})
+    late = list(await db.scalars(
+        select(SalesInvoice).where(SalesInvoice.tenant_id == tid, SalesInvoice.status.in_(("open", "partially_paid")),
+                                   SalesInvoice.due_date < now.date()).order_by(SalesInvoice.due_date).limit(6)
+    ))
+    for i, inv in enumerate(late):
+        sent = now - timedelta(days=i + 1, hours=3)
+        db.add(CollectionReminder(tenant_id=tid, invoice_id=inv.id, customer_id=inv.customer_id, stage="overdue_1",
+                                  status="sent_template" if i % 3 else "sent_text", created_at=sent, sent_at=sent))
+    await db.commit()
 
 
 async def _seed_accounts(db: AsyncSession, tid, now: datetime) -> None:

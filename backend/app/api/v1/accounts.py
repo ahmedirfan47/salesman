@@ -11,10 +11,11 @@ from app.core.permissions import Capability
 from app.db.models.order import Order
 from app.modules.accounts import pdf as account_pdf
 from app.modules.accounts import service
+from app.modules.collections import service as collections
 from app.modules.integrations import hooks as erp
 from app.modules.zatca import service as zatca
 from app.schemas.accounts import (
-    AccountRow, AccountSettingsIn, AccountSettingsOut, AccountsOut, AllocationOut, CreditNoteIn, CreditTermsIn,
+    AccountRow, AccountSettingsIn, AccountSettingsOut, CollectionReminderOut, RemindersRunOut, AccountsOut, AllocationOut, CreditNoteIn, CreditTermsIn,
     CustomerAccountOut, EInvoiceSummary, OpeningBalanceIn, PaymentIn, PaymentOut, SalesInvoiceDetailOut,
     SalesInvoiceOut, StatementOut, TaxDetailsIn, TaxDetailsOut, VoidPaymentIn,
 )
@@ -241,3 +242,16 @@ async def void_payment(
 ) -> PaymentOut:
     payment = await service.void_payment(db, user.tenant_id, payment_id, reason=data.reason, actor_id=user.id, scope=scope)
     return PaymentOut.model_validate(payment)
+
+
+# ---- payment reminders on WhatsApp ----
+@router.get("/reminders", response_model=list[CollectionReminderOut])
+async def list_reminders(db: DBSession, user: CurrentUser) -> list[CollectionReminderOut]:
+    """The latest payment reminders: sent, skipped (and why) or waiting to go out."""
+    return [CollectionReminderOut(**r) for r in await collections.list_reminders(db, user.tenant_id)]
+
+
+@router.post("/reminders/run", response_model=RemindersRunOut, dependencies=[_manage])
+async def run_reminders(db: DBSession, user: CurrentUser) -> RemindersRunOut:
+    """Queue today's reminders now instead of waiting for the hourly check (still 09:00-21:00 local)."""
+    return RemindersRunOut(queued=await collections.queue_due_reminders(db, user.tenant_id))

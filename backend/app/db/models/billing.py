@@ -29,8 +29,14 @@ class Subscription(UUIDPKMixin, TimestampMixin, Base):
     # active -> paused (no new invoices) -> active, or cancelled
     status: Mapped[str] = mapped_column(String(16), default="active", nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    # pilot | growth | enterprise | custom (see app.modules.billing.service.PLANS)
+    plan: Mapped[str] = mapped_column(String(16), default="custom", server_default="custom", nullable=False)
     setup_fee_per_branch: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     monthly_fee_per_branch: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    # orders included per branch per month; NULL = unlimited
+    included_orders_per_branch: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # charged for each order above the included orders, billed on the next monthly invoice
+    overage_per_order: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     tax_percent: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=0, nullable=False)
     payment_terms_days: Mapped[int] = mapped_column(Integer, default=14, nullable=False)
     # days after the due date before the account becomes read-only

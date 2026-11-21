@@ -9,7 +9,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { colors, radius, spacing, typography } from "../theme/theme";
-import { SALES_EMAIL, quote } from "../data/plans";
+import { PlanKey, SALES_EMAIL, quote } from "../data/plans";
 import { PlanCard } from "../components/PlanCard";
 
 interface Props {
@@ -20,10 +20,12 @@ interface Props {
 
 export function SubscriptionScreen({ onSignIn }: Props) {
   const [branches, setBranches] = useState(1);
+  const [plan, setPlan] = useState<PlanKey>("pilot");
 
   function contactSales() {
-    const b = quote(branches).branches;
-    const subject = encodeURIComponent(`Salesman pilot — ${b} branch${b === 1 ? "" : "es"}`);
+    const q = quote(plan, branches);
+    const b = q.branches;
+    const subject = encodeURIComponent(`Salesman ${q.plan.name} plan — ${b} branch${b === 1 ? "" : "es"}`);
     Linking.openURL(`mailto:${SALES_EMAIL}?subject=${subject}`).catch(() => {});
   }
 
@@ -42,9 +44,9 @@ export function SubscriptionScreen({ onSignIn }: Props) {
         </Text>
 
         <View style={{ height: spacing.lg }} />
-        <PlanCard branches={branches} onBranchesChange={setBranches} />
+        <PlanCard branches={branches} onBranchesChange={setBranches} plan={plan} onPlanChange={setPlan} />
 
-        <Text style={styles.finePrint}>Prices in USD, excluding VAT.</Text>
+        <Text style={styles.finePrint}>Prices in SAR, excluding VAT.</Text>
       </ScrollView>
 
       {/* Sticky action footer -- keeps the primary CTA reachable without scrolling */}

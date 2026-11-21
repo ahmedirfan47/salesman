@@ -27,9 +27,12 @@ export type Invoice = {
 
 export type Subscription = {
   status: "active" | "paused" | "cancelled";
+  plan: "pilot" | "growth" | "enterprise" | "custom";
   currency: string;
   setup_fee_per_branch: string;
   monthly_fee_per_branch: string;
+  included_orders_per_branch: number | null;
+  overage_per_order: string | null;
   tax_percent: string;
   payment_terms_days: number;
   grace_days: number;

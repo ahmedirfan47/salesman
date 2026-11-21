@@ -9,6 +9,10 @@ from pydantic import BaseModel, ConfigDict, Field
 # ---- input (Stonic admin console) ----
 class SubscriptionIn(BaseModel):
     status: Literal["active", "paused", "cancelled"] | None = None
+    # choosing a plan fills in its prices; prices sent alongside override them (plan becomes "custom")
+    plan: Literal["pilot", "growth", "enterprise", "custom"] | None = None
+    included_orders_per_branch: int | None = Field(default=None, ge=0, le=10_000_000)
+    overage_per_order: Decimal | None = Field(default=None, ge=0)
     currency: str | None = Field(default=None, min_length=3, max_length=3)
     setup_fee_per_branch: Decimal | None = Field(default=None, ge=0)
     monthly_fee_per_branch: Decimal | None = Field(default=None, ge=0)
@@ -53,9 +57,12 @@ class SubscriptionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     status: str
+    plan: str = "custom"
     currency: str
     setup_fee_per_branch: Decimal
     monthly_fee_per_branch: Decimal
+    included_orders_per_branch: int | None = None
+    overage_per_order: Decimal | None = None
     tax_percent: Decimal
     payment_terms_days: int
     grace_days: int

@@ -32,14 +32,34 @@ from app.db.models.branch import Branch
 from app.db.models.tenant import Tenant
 from app.db.models.user import User
 
-DEFAULT_SETUP_FEE = Decimal("11000")
-DEFAULT_MONTHLY_FEE = Decimal("1050")
 DEFAULT_GRACE_DAYS = 14
+
+# The published plans (keep in step with dashboard/lib/plans.ts). Fees are per
+# branch. Orders above the included orders are billed on the next monthly
+# invoice. "custom" is any hand-set price agreed with a customer.
+PLANS: dict[str, dict] = {
+    "pilot": {
+        "currency": "SAR", "setup_fee_per_branch": Decimal("0"), "monthly_fee_per_branch": Decimal("2500"),
+        "included_orders_per_branch": 2000, "overage_per_order": Decimal("0.60"),
+    },
+    "growth": {
+        "currency": "SAR", "setup_fee_per_branch": Decimal("7500"), "monthly_fee_per_branch": Decimal("3500"),
+        "included_orders_per_branch": 5000, "overage_per_order": Decimal("0.60"),
+    },
+    "enterprise": {
+        "currency": "SAR", "setup_fee_per_branch": Decimal("10000"), "monthly_fee_per_branch": Decimal("4000"),
+        "included_orders_per_branch": None, "overage_per_order": None,
+    },
+}
+DEFAULT_PLAN = "pilot"
+PLAN_FIELDS = ("currency", "setup_fee_per_branch", "monthly_fee_per_branch",
+               "included_orders_per_branch", "overage_per_order")
 _CENT = Decimal("0.01")
 _MAX_CATCH_UP_MONTHS = 12
 
 SUBSCRIPTION_FIELDS = (
     "status", "currency", "setup_fee_per_branch", "monthly_fee_per_branch", "tax_percent",
+    "included_orders_per_branch", "overage_per_order",
     "payment_terms_days", "grace_days", "next_invoice_on", "billing_name", "billing_address",
     "billing_tax_id", "billing_email", "notes",
 )
@@ -103,19 +123,38 @@ async def list_invoices(db: AsyncSession, tenant_id: uuid.UUID) -> list[Invoice]
 # --- subscription ------------------------------------------------------------------
 
 async def upsert_subscription(db: AsyncSession, tenant_id: uuid.UUID, data: dict, *, on: date | None = None) -> Subscription:
-    """Create the subscription, or change the fields given. Changes apply to invoices issued from now on."""
+    """Create the subscription, or change the fields given. Changes apply to invoices issued from now on.
+
+    Choosing a plan ("pilot", "growth", "enterprise") fills in that plan's prices; any price
+    sent in the same request overrides it, and the plan then becomes "custom". A new
+    subscription starts on the pilot plan unless told otherwise."""
     on = on or today()
     tenant = await get_tenant(db, tenant_id)
     sub = await get_subscription(db, tenant_id)
+    plan = data.get("plan")
+    if plan is not None and plan not in PLANS and plan != "custom":
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Unknown plan '{plan}'")
     if sub is None:
+        start_plan = plan if plan in PLANS else DEFAULT_PLAN
         sub = Subscription(
-            tenant_id=tenant_id, status="active", currency="USD",
-            setup_fee_per_branch=DEFAULT_SETUP_FEE, monthly_fee_per_branch=DEFAULT_MONTHLY_FEE,
-            tax_percent=Decimal("0"), payment_terms_days=14, grace_days=DEFAULT_GRACE_DAYS,
+            tenant_id=tenant_id, status="active", plan=start_plan, tax_percent=Decimal("0"),
+            payment_terms_days=14, grace_days=DEFAULT_GRACE_DAYS,
             next_invoice_on=on, setup_billed_branches=0, billing_name=tenant.name,
+            **PLANS[start_plan],
         )
         db.add(sub)
+    elif plan in PLANS and plan != sub.plan:
+        for field in PLAN_FIELDS:
+            setattr(sub, field, PLANS[plan][field])
+        sub.plan = plan
+    if plan == "custom":
+        sub.plan = "custom"
+    if any(data.get(f) is not None for f in PLAN_FIELDS if f != "currency"):
+        sub.plan = "custom"
     old_status = sub.status
+    for field in ("included_orders_per_branch", "overage_per_order"):
+        if field in data and data[field] is None and sub.plan == "custom":
+            setattr(sub, field, None)  # a custom plan may switch the order limit off (unlimited)
     for field in SUBSCRIPTION_FIELDS:
         if field in data and data[field] is not None:
             value = data[field]
@@ -207,14 +246,53 @@ async def _issue_monthly(db: AsyncSession, tenant: Tenant, sub: Subscription, is
     if already is not None:
         return None
     branches = max(await active_branches(db, tenant.id), 1)
+    lines = [{
+        "description": f"Salesman subscription, {_plural(branches)}, {start:%d %b %Y} to {end:%d %b %Y}",
+        "quantity": branches, "unit_amount": sub.monthly_fee_per_branch,
+    }]
+    overage = await _overage_line(db, tenant.id, sub, start, branches)
+    if overage is not None:
+        lines.append(overage)
     invoice = await _issue(
-        db, tenant, sub, kind="subscription", issued_on=issued_on, period=(start, end),
-        lines=[{
-            "description": f"Salesman subscription, {_plural(branches)}, {start:%d %b %Y} to {end:%d %b %Y}",
-            "quantity": branches, "unit_amount": sub.monthly_fee_per_branch,
-        }],
+        db, tenant, sub, kind="subscription", issued_on=issued_on, period=(start, end), lines=lines,
     )
     return invoice
+
+
+async def orders_in_period(db: AsyncSession, tenant_id: uuid.UUID, start: date, end: date) -> int:
+    """Orders confirmed between start and end (inclusive, UTC dates), cancelled ones excluded."""
+    from app.db.models.order import Order  # local: billing must not depend on orders at import time
+
+    lo = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
+    hi = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+    return int(await db.scalar(
+        select(func.count(Order.id)).where(
+            Order.tenant_id == tenant_id, Order.confirmed_at >= lo, Order.confirmed_at < hi,
+            Order.status != "cancelled",
+        )
+    ) or 0)
+
+
+async def _overage_line(
+    db: AsyncSession, tenant_id: uuid.UUID, sub: Subscription, start: date, branches: int,
+) -> dict | None:
+    """Orders above the plan in the month before `start`, billed in arrears."""
+    if not sub.included_orders_per_branch or not sub.overage_per_order:
+        return None
+    prev_start = add_months(start, -1)
+    prev_end = start - timedelta(days=1)
+    counted_from = max(prev_start, sub.created_at.date() if sub.created_at else prev_start)
+    if counted_from > prev_end:
+        return None
+    used = await orders_in_period(db, tenant_id, counted_from, prev_end)
+    extra = used - sub.included_orders_per_branch * branches
+    if extra <= 0:
+        return None
+    return {
+        "description": f"Orders above plan, {prev_start:%d %b %Y} to {prev_end:%d %b %Y} "
+                       f"({used:,} orders, {sub.included_orders_per_branch * branches:,} included)",
+        "quantity": extra, "unit_amount": sub.overage_per_order,
+    }
 
 
 async def issue_due_invoices(db: AsyncSession, *, on: date | None = None, tenant_id: uuid.UUID | None = None) -> int:

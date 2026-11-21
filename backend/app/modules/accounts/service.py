@@ -99,6 +99,8 @@ async def update_settings(db: AsyncSession, tenant_id: uuid.UUID, data: dict) ->
     for key, value in data.items():
         if key in ("default_credit_limit",):
             setattr(row, key, value)  # None clears the default limit
+        elif key == "reminder_template":
+            setattr(row, key, (value or "").strip() or None)  # empty clears the template
         elif value is not None:
             setattr(row, key, value.upper() if key == "currency" else value)
     await db.commit()

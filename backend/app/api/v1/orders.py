@@ -5,8 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.core.branches import BranchScope
 from app.core.deps import CurrentUser, DBSession, require_capability
 from app.core.permissions import Capability, has_capability
-from app.modules.orders import service
+from app.modules.orders import review, service
 from app.schemas.order import (
+    CorrectEscalation,
     EscalationOut,
     OrderCreate,
     OrderDetailOut,
@@ -94,4 +95,24 @@ async def resolve_escalation(
     return await service.resolve_escalation(
         db, user.tenant_id, escalation_id, approve=data.approve, note=data.note, actor_id=user.id,
         scope=scope,
+    )
+
+
+@router.post(
+    "/escalations/{escalation_id}/correct",
+    response_model=EscalationOut,
+    dependencies=[Depends(require_capability(Capability.RESOLVE_ESCALATION))],
+)
+async def correct_escalation(
+    escalation_id: uuid.UUID,
+    data: CorrectEscalation,
+    db: DBSession,
+    user: CurrentUser,
+    scope: BranchScope,
+) -> EscalationOut:
+    """Fix a held order's items (product or quantity), then approve it. When a line carries
+    the customer's original words, the AI remembers the correction for next time."""
+    return await review.correct_held_order(
+        db, user.tenant_id, escalation_id, [i.model_dump() for i in data.items],
+        note=data.note, actor_id=user.id, scope=scope,
     )

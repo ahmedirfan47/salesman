@@ -47,3 +47,31 @@ class ProductCatalogRow(BaseModel):
     price_max: float | None = None
     currency: str | None
     stock: int
+
+class ProductAliasIn(BaseModel):
+    alias: str = Field(min_length=2, max_length=200)
+    # set to make the alias apply to one customer's messages only
+    customer_id: uuid.UUID | None = None
+
+
+class ProductAliasOut(BaseModel):
+    id: uuid.UUID
+    product_id: uuid.UUID
+    sku: str
+    product_name: str
+    alias: str
+    customer_id: uuid.UUID | None
+    customer_name: str | None
+    source: str
+    hits: int
+    last_used_at: datetime | None
+    created_at: datetime
+
+
+class ProductMatchOut(BaseModel):
+    product_id: uuid.UUID
+    sku: str
+    name_en: str
+    name_ar: str | None
+    score: float
+    matched_by: str

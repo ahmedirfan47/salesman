@@ -50,6 +50,17 @@ class AccountSettings(UUIDPKMixin, TimestampMixin, Base):
     hold_when_overdue: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     overdue_grace_days: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
+    # payment reminders on WhatsApp (see app.modules.collections)
+    reminders_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    # remind this many days before the due date; 0 = no "due soon" reminder
+    reminder_days_before_due: Mapped[int] = mapped_column(Integer, default=3, server_default="3", nullable=False)
+    # after the due date, remind every N days ...
+    reminder_repeat_days: Mapped[int] = mapped_column(Integer, default=7, server_default="7", nullable=False)
+    # ... at most this many times per invoice
+    reminder_max_overdue: Mapped[int] = mapped_column(Integer, default=3, server_default="3", nullable=False)
+    # Meta-approved template for reminders outside the 24-hour window (params: name, invoice, amount, due date)
+    reminder_template: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
     # the seller as printed on invoices and statements (and sent to ZATCA later)
     seller_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     seller_name_ar: Mapped[str | None] = mapped_column(String(255), nullable=True)

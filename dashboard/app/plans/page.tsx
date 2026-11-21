@@ -48,10 +48,11 @@ export default function PublicPlansPage() {
         </nav>
       </header>
 
-      <div className="mx-auto max-w-4xl px-4 py-12 sm:px-6">
-        <h1 className="text-center text-3xl font-bold sm:text-4xl">Simple pricing, per branch</h1>
-        <p className="mx-auto mt-3 max-w-lg text-center text-slate-500">
-          One plan with everything included. A one-time setup for each branch, then a monthly subscription.
+      <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6">
+        <h1 className="text-center text-3xl font-bold sm:text-4xl">Start with a paid pilot</h1>
+        <p className="mx-auto mt-3 max-w-xl text-center text-slate-500">
+          Prove Salesman on your own WhatsApp orders for 60 days, then move to Growth or Enterprise.
+          Priced per branch, in Saudi riyals.
         </p>
 
         {DEMO_AVAILABLE && (

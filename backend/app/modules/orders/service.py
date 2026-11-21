@@ -95,8 +95,15 @@ async def create_order(
     *,
     actor_id: uuid.UUID | None = None,
     scope: uuid.UUID | None = None,
+    review: list[dict] | None = None,
+    ai_lines: list[dict] | None = None,
 ) -> Order:
+    """`review`: reasons the AI's order needs a person to check it (see
+    app.modules.orders.review). Any reason holds the order, like a stock or
+    credit problem does. `ai_lines`: the customer's own words per line, kept
+    on the escalation so staff see what was asked for."""
     now = datetime.now(timezone.utc)
+    review = review or []
 
     # 0. if the order is for a known customer, pull their details + zone so the
     #    order is ready for (auto-)assignment. Explicit fields on the request win.
@@ -168,8 +175,8 @@ async def create_order(
 
     order_number = await _generate_order_number(db, tenant_id)
 
-    # 2a. any shortfall or credit problem -> hold for human review, create escalation, touch no stock
-    if shortfalls or credit_reasons:
+    # 2a. any shortfall, credit problem or AI doubt -> hold for human review, create escalation, touch no stock
+    if shortfalls or credit_reasons or review:
         order = Order(
             tenant_id=tenant_id,
             branch_id=branch_id,
@@ -215,16 +222,22 @@ async def create_order(
                 for s in shortfalls
             )
             parts.append(f"Insufficient stock -> {rec}")
-        advice = (
-            "Approve to supply on credit anyway (partial where stock is short) or reject."
-            if credit_reasons else "Approve partial/backorder or reject."
-        )
+        if review:
+            parts.append("Check the AI's order -> " + "; ".join(r["message"] for r in review))
+        if credit_reasons:
+            advice = "Approve to supply on credit anyway (partial where stock is short) or reject."
+        elif shortfalls:
+            advice = "Approve partial/backorder or reject."
+        else:
+            advice = "Correct the items if needed, then approve, or reject."
+        reason_type = "credit" if credit_reasons else "insufficient_stock" if shortfalls else "ai_review"
         db.add(
             Escalation(
                 tenant_id=tenant_id,
                 branch_id=branch_id,
-                reason_type="credit" if credit_reasons else "insufficient_stock",
-                context={"order_number": order_number, "shortfalls": shortfalls, "credit": credit_reasons},
+                reason_type=reason_type,
+                context={"order_number": order_number, "shortfalls": shortfalls, "credit": credit_reasons,
+                         "review": review, "lines": ai_lines or []},
                 ai_recommendation=f"{'. '.join(parts)}. {advice}",
                 order_id=order.id,
                 customer_name=cust_name,
