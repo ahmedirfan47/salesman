@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import ForeignKey, Integer, Numeric, String
+from sqlalchemy import Boolean, ForeignKey, Integer, Numeric, String, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -35,6 +35,16 @@ class OrderItem(UUIDPKMixin, TimestampMixin, Base):
     # Nullable: orders placed before this field existed, or for a product
     # with no cost set, correctly have no cost data rather than a fake 0.
     unit_cost: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+
+    # the branch list price before any customer price or deal, and where the
+    # charged price came from: list | customer | promotion. NULL on older orders.
+    list_price: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    price_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    promotion_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("promotions.id", ondelete="SET NULL"), nullable=True
+    )
+    # free goods from a buy-X-get-Y deal (unit_price 0)
+    is_free: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
 
     # what the item needed vs had, for the human-review case
     available_at_order: Mapped[int | None] = mapped_column(Integer, nullable=True)

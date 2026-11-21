@@ -458,7 +458,7 @@ async def test_api(session, client, fake):
 
     r = await client.get("/api/v1/integrations", headers=owner)
     assert r.status_code == 200 and r.json()["connection"] is None
-    assert [p["key"] for p in r.json()["providers"]] == ["odoo", "zoho_books", "qoyod", "sap_b1"]
+    assert [p["key"] for p in r.json()["providers"]] == ["odoo", "sap_b1", "dynamics_bc", "zoho_books", "qoyod"]
 
     body = {"provider": "odoo", "url": "acme.odoo.com/odoo", "database": "acme", "username": "admin", "api_key": "bad"}
     r = await client.post("/api/v1/integrations/connect", json=body, headers=owner)

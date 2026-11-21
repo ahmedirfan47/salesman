@@ -1,15 +1,21 @@
-// Types and labels for ERP integrations (Odoo first).
+// Types and labels for ERP integrations: Odoo, SAP Business One, Dynamics 365 Business Central.
 
-export type Provider = { key: string; name: string; available: boolean };
+export type ConnectField = { label: string; placeholder?: string; optional?: boolean; default?: string; advanced?: boolean };
+export type Provider = { key: string; name: string; available: boolean; connect_fields: Record<string, ConnectField> };
 
-export type BranchMapping = { warehouse_id: number | null; pricelist_id: number | null };
+/** Odoo and SAP price lists use numbers; SAP codes and Business Central ids are strings. */
+export type Ref = number | string;
+
+export type BranchMapping = { warehouse_id: Ref | null; pricelist_id: Ref | null };
 
 export type ConnectionSettings = {
-  company_id?: number | null;
+  company_id?: Ref | null;
   company_currency?: string;
-  sales_journal_id?: number | null;
-  taxes?: Record<string, number>;
-  payment_journals?: Record<string, number>;
+  sales_journal_id?: Ref | null;
+  taxes?: Record<string, Ref>;
+  payment_journals?: Record<string, Ref>;
+  adjustment_account?: Ref | null;
+  aad_tenant?: string | null;
   branches?: Record<string, BranchMapping>;
   push_orders?: boolean;
   validate_deliveries?: boolean;
@@ -26,7 +32,7 @@ export type Connection = {
   base_url: string;
   database: string | null;
   username: string | null;
-  api: "json2" | "jsonrpc" | null;
+  api: string | null;
   server_version: string | null;
   settings: ConnectionSettings;
   connected_at: string | null;
@@ -40,15 +46,44 @@ export type Counts = { ok: number; warning: number; failed: number; skipped: num
 
 export type Overview = { providers: Provider[]; connection: Connection | null; problems: string[]; counts: Counts };
 
-type Named = { id: number; name: string; company_id?: number | null };
+type Named = { id: Ref; name: string; company_id?: Ref | null };
 export type Options = {
   version: string | null;
   api: string;
-  companies: (Named & { currency: string })[];
+  companies: (Named & { currency: string | null })[];
   warehouses: (Named & { code: string })[];
   pricelists: (Named & { currency: string })[];
   journals: (Named & { type: "sale" | "bank" | "cash"; code: string })[];
-  taxes: (Named & { amount: number; price_include: boolean })[];
+  taxes: (Named & { amount: number | null; price_include: boolean })[];
+  accounts?: Named[];
+  labels?: Record<string, string>;
+};
+
+export type TestResult = {
+  ok: boolean; kind: "ok" | "login" | "unreachable" | "refused"; message: string; latency_ms: number;
+  version?: string | null; companies?: number | null; warehouses?: number | null; price_lists?: number | null;
+  taxes?: number | null; problems: string[];
+};
+
+export type HealthCheck = { key: string; status: "ok" | "info" | "warning" | "error"; message: string };
+export type Health = { status: "healthy" | "degraded" | "down" | "off"; checks: HealthCheck[]; checked_at: string };
+
+export type DryRunBranch = {
+  branch: string; products: number; new: number; price_changes: number; stock_changes: number;
+  not_in_erp: string[]; not_in_erp_count: number;
+  examples: { sku: string; kind: "new" | "price" | "stock"; from?: string | number; to?: string | number; price?: string; quantity?: number }[];
+};
+export type DryRun = { products: number; new_products: number; branches: DryRunBranch[]; notes: string[]; message: string | null };
+
+export const PROVIDER_NAME: Record<string, string> = {
+  odoo: "Odoo", sap_b1: "SAP Business One", dynamics_bc: "Business Central", zoho_books: "Zoho Books", qoyod: "Qoyod",
+};
+
+/** Where to get the login, per system. */
+export const PROVIDER_HELP: Record<string, string> = {
+  odoo: "In Odoo, open your profile › Preferences › Account Security and create an API key. Use a user who can manage sales, inventory and invoicing.",
+  sap_b1: "Use the Service Layer address (usually port 50000) published over HTTPS, the company database name, and a SAP user with sales, inventory and banking authorisations.",
+  dynamics_bc: "Register an app in Microsoft Entra with the Business Central API permission (API.ReadWrite.All), create a client secret, then add the app in Business Central under Microsoft Entra Applications and give it D365 BUS FULL ACCESS.",
 };
 
 export type ConnectResult = { connection: Connection; options: Options; problems: string[] };
@@ -67,7 +102,9 @@ export type SyncEvent = {
   updated_at: string;
 };
 
-export type Balance = { customer_id: string; name: string | null; salesman: string; odoo: string; difference: string; partner_id: number };
+export type Balance = {
+  customer_id: string; name: string | null; salesman: string; odoo: string; erp?: string | null; difference: string; partner_id: Ref;
+};
 
 export const ACTION_LABEL: Record<string, string> = {
   "order.confirmed": "Sales order",
@@ -77,7 +114,7 @@ export const ACTION_LABEL: Record<string, string> = {
   payment: "Payment",
   "payment.void": "Payment reversed",
   customer: "Customer",
-  catalog: "Fetched from Odoo",
+  catalog: "Prices and stock",
 };
 
 export const METHOD_LABEL: Record<string, string> = {

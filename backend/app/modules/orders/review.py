@@ -56,6 +56,10 @@ async def update_settings(db: AsyncSession, tenant_id: uuid.UUID, data: dict) ->
     for key, value in data.items():
         if value is not None and hasattr(row, key):
             setattr(row, key, value)
+    if data.get("reorder_template") == "":
+        row.reorder_template = None
+    if data.get("message_retention_days") == 0:
+        row.message_retention_days = None
     await db.commit()
     await db.refresh(row)
     return row
@@ -257,17 +261,34 @@ async def correct_held_order(
             raise HTTPException(status.HTTP_404_NOT_FOUND, f"No active price for SKU '{sku}' at this branch")
         new_lines.append((row[0], row[1], qty, (line.get("wording") or "").strip() or None))
 
+    before = {i.sku: i.quantity for i in order.items if not i.is_free}
+    after: dict[str, int] = {}
+    for product, _, qty, _ in new_lines:
+        after[product.sku] = after.get(product.sku, 0) + qty
+    lines_changed = sum(1 for sku in set(before) | set(after) if before.get(sku) != after.get(sku))
+
+    from app.modules.deals import service as deals  # the customer's prices and deals apply as on any order
+
+    quotes, free = await deals.quote(db, tenant_id, order.branch_id, customer.id if customer else None,
+                                     [(product.id, qty, Decimal(str(price.unit_price))) for product, price, qty, _ in new_lines])
     for item in list(order.items):
         order.items.remove(item)
     await db.flush()
     total = Decimal("0")
-    for product, price, qty, _ in new_lines:
-        line_total = Decimal(str(price.unit_price)) * qty
+    for (product, price, qty, _), q in zip(new_lines, quotes):
+        line_total = q.unit_price * qty
         total += line_total
         order.items.append(OrderItem(
             tenant_id=tenant_id, product_id=product.id, sku=product.sku, product_name=product.name_en,
-            quantity=qty, unit_price=price.unit_price, unit_cost=product.cost_price, line_total=line_total,
-            available_at_order=None,
+            quantity=qty, unit_price=q.unit_price, unit_cost=product.cost_price, line_total=line_total,
+            available_at_order=None, list_price=q.list_price, price_source=q.source, promotion_id=q.promotion_id,
+        ))
+    for f in free:
+        product = await db.get(Product, f.product_id)
+        order.items.append(OrderItem(
+            tenant_id=tenant_id, product_id=product.id, sku=product.sku, product_name=product.name_en,
+            quantity=f.quantity, unit_price=Decimal("0.00"), unit_cost=product.cost_price, line_total=Decimal("0.00"),
+            available_at_order=None, price_source="promotion", promotion_id=f.promotion_id, is_free=True,
         ))
     order.total_amount = total
     order.price_list_id = new_lines[0][1].price_list_id
@@ -280,7 +301,8 @@ async def correct_held_order(
                 source="correction", actor_id=actor_id,
             ):
                 learned += 1
-    esc.context = {**(esc.context or {}), "corrected": True, "aliases_learned": learned}
+    esc.context = {**(esc.context or {}), "corrected": True, "aliases_learned": learned,
+                   "lines_before": len(before), "lines_changed": lines_changed}
     await db.commit()
 
     return await orders.resolve_escalation(

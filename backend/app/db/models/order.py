@@ -34,6 +34,8 @@ class Order(UUIDPKMixin, TimestampMixin, Base):
     whatsapp_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     status: Mapped[str] = mapped_column(String(30), default="pending", nullable=False)
+    # who took the order: ai (the WhatsApp agent) | manual (staff, app, API)
+    source: Mapped[str] = mapped_column(String(16), default="manual", server_default="manual", nullable=False)
     total_amount: Mapped[float] = mapped_column(Numeric(14, 2), default=0, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
 

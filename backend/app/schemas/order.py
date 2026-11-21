@@ -30,6 +30,9 @@ class OrderItemOut(BaseModel):
     unit_price: Decimal
     line_total: Decimal
     available_at_order: int | None
+    list_price: Decimal | None = None
+    price_source: str | None = None       # list | customer | promotion
+    is_free: bool = False
 
 
 class OrderOut(BaseModel):
@@ -39,6 +42,7 @@ class OrderOut(BaseModel):
     branch_id: uuid.UUID
     order_number: str
     status: str
+    source: str = "manual"
     customer_name: str | None
     customer_company: str | None
     whatsapp_number: str | None

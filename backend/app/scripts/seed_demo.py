@@ -315,6 +315,7 @@ async def seed(db: AsyncSession, email: str, password: str, *, reset: bool = Fal
     await _seed_accounts(db, tid, now)
     await _seed_einvoicing(db, tid, rid, now)
     await _seed_intelligence(db, tid, rid, now)
+    await _seed_operations(db, tid, rid, now)
     return tenant
 
 
@@ -516,6 +517,86 @@ async def _seed_intelligence(db: AsyncSession, tid, rid, now: datetime) -> None:
         sent = now - timedelta(days=i + 1, hours=3)
         db.add(CollectionReminder(tenant_id=tid, invoice_id=inv.id, customer_id=inv.customer_id, stage="overdue_1",
                                   status="sent_template" if i % 3 else "sent_text", created_at=sent, sent_at=sent))
+    await db.commit()
+
+
+async def _seed_operations(db: AsyncSession, tid, rid, now: datetime) -> None:
+    """AI-taken orders and how the team judged them (the accuracy report), customer prices and
+    deals, reorder reminders, a print agent at the warehouse and data-protection settings."""
+    import hashlib
+    import secrets
+
+    from app.db.models.data_request import DataRequest
+    from app.db.models.deals import CustomerPrice, Promotion
+    from app.db.models.print_agent import PrintAgent
+    from app.db.models.reorder import ReorderNudge
+    from app.modules.orders import review
+
+    products = {p.sku: p for p in await db.scalars(select(Product).where(Product.tenant_id == tid))}
+    customers = {c.name: c for c in await db.scalars(select(Customer).where(Customer.tenant_id == tid))}
+
+    # about two thirds of recent orders came in through the WhatsApp AI
+    recent = list(await db.scalars(select(Order).where(
+        Order.tenant_id == tid, Order.customer_id.is_not(None), Order.created_at >= now - timedelta(days=40),
+    ).order_by(Order.created_at)))
+    ai_orders = [o for i, o in enumerate(recent) if i % 3 != 2]
+    for o in ai_orders:
+        o.source = "ai"
+    held = await db.scalar(select(Order).where(Order.tenant_id == tid, Order.status == "requires_human_review"))
+    if held is not None:
+        held.source = "ai"
+    # the team checked some of them: most approved as they were, a few corrected, one rejected
+    outcomes = ["approved"] * 5 + ["corrected"] * 2 + ["rejected"]
+    for o, outcome in zip(ai_orders[-len(outcomes) * 2::2], outcomes):
+        lines = await db.scalar(select(func.count(OrderItem.id)).where(OrderItem.order_id == o.id)) or 1
+        ctx = {"order_number": o.order_number, "shortfalls": [], "credit": [], "lines": [],
+               "review": [{"kind": "low_confidence", "message": "The customer's words were not a clear match"}]}
+        if outcome == "corrected":
+            ctx.update({"corrected": True, "lines_before": lines, "lines_changed": 1, "aliases_learned": 1})
+        db.add(Escalation(tenant_id=tid, branch_id=o.branch_id, reason_type="ai_review", context=ctx,
+                          ai_recommendation="Check the AI's order", order_id=o.id, customer_name=o.customer_name,
+                          status="resolved", resolution="rejected" if outcome == "rejected" else "approved",
+                          resolved_at=o.created_at + timedelta(minutes=9), created_at=o.created_at))
+
+    # deals: two agreed customer prices and two promotions
+    noor, waha = customers.get("Al Noor Grocery"), customers.get("Al Waha Market")
+    if noor and "TOM-5" in products:
+        db.add(CustomerPrice(tenant_id=tid, customer_id=noor.id, product_id=products["TOM-5"].id, unit_price=Decimal("33.50"),
+                             min_quantity=20, note="Agreed for 20+ cartons"))
+    if waha and "CUC-5" in products:
+        db.add(CustomerPrice(tenant_id=tid, customer_id=waha.id, product_id=products["CUC-5"].id, unit_price=Decimal("26.00")))
+    if "MAN-4" in products:
+        db.add(Promotion(tenant_id=tid, name="Mango season: buy 10, get 1 free", kind="buy_get", product_id=products["MAN-4"].id,
+                         buy_quantity=10, free_quantity=1, starts_on=(now - timedelta(days=5)).date(),
+                         ends_on=(now + timedelta(days=25)).date()))
+    if "ORA-8" in products:
+        db.add(Promotion(tenant_id=tid, name="Oranges 5% off on 15+", kind="percent_off", product_id=products["ORA-8"].id,
+                         percent_off=Decimal("5"), min_quantity=15))
+
+    # reorder reminders: switched on; two sent this week, one brought an order back
+    settings = await review.get_settings(db, tid)
+    settings.reorder_enabled, settings.reorder_template, settings.message_retention_days = True, "usual_order", 365
+    for k, c in enumerate([c for c in (customers.get("Hayat Minimarket"), customers.get("Al Waha Market")) if c]):
+        last = await db.scalar(select(Order).where(Order.customer_id == c.id).order_by(Order.created_at.desc()).limit(1))
+        if last is None:
+            continue
+        items = [{"sku": it.sku, "name": it.product_name, "name_ar": None, "quantity": it.quantity}
+                 for it in await db.scalars(select(OrderItem).where(OrderItem.order_id == last.id))]
+        sent = now - timedelta(days=2 + k, hours=2)
+        nudge = ReorderNudge(tenant_id=tid, customer_id=c.id, last_order_id=last.id, status="sent", due_on=sent.date(),
+                             typical_days=6 + k, suggested=items, sent_at=sent, created_at=sent,
+                             message=f"Hello {c.name}, it's about time for your usual order.")
+        if k == 0:
+            nudge.converted_order_id, nudge.converted_at = last.id, sent + timedelta(hours=5)
+        db.add(nudge)
+
+    # the warehouse PC that prints the slips
+    key = "spa_" + secrets.token_urlsafe(32)
+    db.add(PrintAgent(tenant_id=tid, branch_id=rid, name="Riyadh dock PC", key_prefix=key[:12],
+                      key_hash=hashlib.sha256(key.encode()).hexdigest(), printer="EPSON TM-T20III", version="1.0.0",
+                      last_seen_at=now))
+    db.add(DataRequest(tenant_id=tid, kind="export", detail={"records": {"customers": len(customers), "orders": len(recent)}},
+                       created_at=now - timedelta(days=3)))
     await db.commit()
 
 

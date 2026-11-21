@@ -10,7 +10,8 @@ from app.core.permissions import Capability
 from app.db.models.branch import Branch
 from app.modules.integrations import service
 from app.schemas.integration import (
-    BalanceOut, ConnectIn, ConnectionOut, ConnectOut, Counts, EventOut, OverviewOut, ProviderOut, SettingsIn,
+    BalanceOut, ConnectIn, ConnectionOut, ConnectOut, Counts, EventOut, HealthOut, OverviewOut, ProviderOut, SettingsIn,
+    TestOut,
 )
 
 router = APIRouter(
@@ -20,7 +21,8 @@ router = APIRouter(
 
 
 def _providers() -> list[ProviderOut]:
-    return [ProviderOut(key=k, **v) for k, v in service.PROVIDERS.items()]
+    fields = service.connect_fields()
+    return [ProviderOut(key=k, connect_fields=fields.get(k, {}), **v) for k, v in service.PROVIDERS.items()]
 
 
 @router.get("", response_model=OverviewOut)
@@ -40,7 +42,7 @@ async def overview(db: DBSession, user: CurrentUser) -> OverviewOut:
 async def connect(data: ConnectIn, db: DBSession, user: CurrentUser) -> ConnectOut:
     conn, options = await service.connect(
         db, user.tenant_id, provider=data.provider, url=data.url, database=data.database,
-        username=data.username, api_key=data.api_key,
+        username=data.username, api_key=data.api_key, tenant=data.tenant,
     )
     return ConnectOut(connection=ConnectionOut.model_validate(conn), options=options,
                       problems=await service.problems(db, conn, options))
@@ -81,6 +83,32 @@ async def pause(db: DBSession, user: CurrentUser) -> ConnectionOut:
 async def disconnect(db: DBSession, user: CurrentUser) -> None:
     conn = await service.require_connection(db, user.tenant_id)
     await service.disconnect(db, conn)
+
+
+@router.post("/test", response_model=TestOut)
+async def test_connection(db: DBSession, user: CurrentUser) -> TestOut:
+    """Log in and read the setup now. Says what is wrong instead of failing."""
+    conn = await service.require_connection(db, user.tenant_id)
+    return TestOut(**await service.test_connection(db, conn))
+
+
+@router.post("/dry-run")
+async def dry_run(db: DBSession, user: CurrentUser) -> dict:
+    """What the next price and stock sync would change in each branch. Writes nothing."""
+    conn = await service.require_connection(db, user.tenant_id)
+    return await service.dry_run(db, conn)
+
+
+@router.get("/health", response_model=HealthOut)
+async def health(db: DBSession, user: CurrentUser) -> HealthOut:
+    conn = await service.require_connection(db, user.tenant_id)
+    return HealthOut(**await service.health(db, conn))
+
+
+@router.post("/events/retry-failed")
+async def retry_failed(db: DBSession, user: CurrentUser) -> dict:
+    conn = await service.require_connection(db, user.tenant_id)
+    return {"queued": await service.retry_failed(db, conn)}
 
 
 @router.post("/sync", status_code=202)

@@ -20,15 +20,13 @@ Errors:
 - OdooUnavailable: the server could not be reached, timed out, or answered
   with a gateway or overload error. The job queue retries it.
 """
-import ipaddress
 import logging
-import socket
 from dataclasses import dataclass, field
-from urllib.parse import urlsplit
 
 import httpx
 
-from app.config import settings
+from app.modules.integrations.errors import ErpAuthError, ErpError, ErpUnavailable, check_public_url
+from app.modules.integrations.errors import normalise_url as _normalise
 
 logger = logging.getLogger("salesman.integrations")
 
@@ -41,50 +39,30 @@ TRANSPORT: httpx.AsyncBaseTransport | None = None
 _TRANSIENT_NAMES = ("SerializationFailure", "LockNotAvailable", "concurrent update", "could not serialize")
 
 
-class OdooError(Exception):
+class OdooError(ErpError):
     def __init__(self, message: str, name: str | None = None):
-        super().__init__(message)
-        self.name = name or "odoo.exceptions.UserError"
-        self.message = message
+        super().__init__(message, name or "odoo.exceptions.UserError")
 
 
-class OdooAuthError(OdooError):
+class OdooAuthError(OdooError, ErpAuthError):
     pass
 
 
-class OdooUnavailable(Exception):
+class OdooUnavailable(ErpUnavailable):
     pass
 
 
 def normalise_url(url: str) -> str:
-    url = (url or "").strip().rstrip("/")
-    if url and "://" not in url:
-        url = "https://" + url
-    for suffix in ("/odoo", "/web", "/web/login"):
-        if url.endswith(suffix):
-            url = url[: -len(suffix)]
-    return url
+    return _normalise(url, ("/odoo", "/web", "/web/login"))
 
 
 def check_url(url: str) -> str:
     """Only public http(s) addresses: a business must not be able to make our server call its own network."""
-    url = normalise_url(url)
-    parts = urlsplit(url)
-    if parts.scheme not in ("http", "https") or not parts.hostname:
-        raise OdooAuthError("Enter the Odoo address, e.g. https://yourcompany.odoo.com")
-    if settings.ERP_ALLOW_PRIVATE_URLS:
-        return url
-    if parts.scheme != "https":
-        raise OdooAuthError("Use the https:// address of your Odoo.")
     try:
-        infos = socket.getaddrinfo(parts.hostname, parts.port or 443, proto=socket.IPPROTO_TCP)
-    except (socket.gaierror, UnicodeError):
-        return url  # can't be resolved here; the request itself will fail with a clear message
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
-            raise OdooAuthError("That address points to a private network. Use your Odoo's public address.")
-    return url
+        return check_public_url(url, system="Odoo", example="https://yourcompany.odoo.com",
+                                strip=("/odoo", "/web", "/web/login"))
+    except ErpAuthError as exc:
+        raise OdooAuthError(str(exc)) from None
 
 
 def _clean(message: str | None) -> str:

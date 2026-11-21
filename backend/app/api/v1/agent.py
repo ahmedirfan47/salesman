@@ -36,6 +36,9 @@ def _settings_out(row) -> AgentSettingsOut:
     return AgentSettingsOut(
         review_min_confidence=float(row.review_min_confidence), review_quantity_multiple=row.review_quantity_multiple,
         learn_aliases=row.learn_aliases, review_all_ai_orders=row.review_all_ai_orders,
+        reorder_enabled=row.reorder_enabled, reorder_factor=float(row.reorder_factor),
+        reorder_min_orders=row.reorder_min_orders, reorder_template=row.reorder_template,
+        message_retention_days=row.message_retention_days,
     )
 
 

@@ -1,7 +1,7 @@
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import Boolean, ForeignKey, Integer, Numeric
+from sqlalchemy import Boolean, ForeignKey, Integer, Numeric, String, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -34,3 +34,16 @@ class AgentSettings(UUIDPKMixin, TimestampMixin, Base):
     review_quantity_multiple: Mapped[int] = mapped_column(Integer, default=4, nullable=False)
     learn_aliases: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     review_all_ai_orders: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # Reorder agent (app.modules.reorder): message a customer their usual
+    # order when they are `reorder_factor` x later than their usual gap
+    # between orders, once they have at least `reorder_min_orders` orders.
+    reorder_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
+    reorder_factor: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=Decimal("1.25"), server_default="1.25",
+                                                    nullable=False)
+    reorder_min_orders: Mapped[int] = mapped_column(Integer, default=3, server_default="3", nullable=False)
+    reorder_template: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+    # Data protection: delete WhatsApp message text older than this many days
+    # (orders and invoices are kept). NULL keeps messages.
+    message_retention_days: Mapped[int | None] = mapped_column(Integer, nullable=True)

@@ -10,6 +10,8 @@ from app.db.models.customer import Customer
 from app.db.models.conversation import Conversation
 from app.db.models.escalation import Escalation
 from app.db.models.integration import IntegrationConnection, IntegrationEvent, IntegrationLink
+from app.db.models.data_request import DataRequest
+from app.db.models.deals import CustomerPrice, Promotion
 from app.db.models.inventory import Inventory
 from app.db.models.inventory_transaction import InventoryTransaction
 from app.db.models.job import Job
@@ -19,11 +21,13 @@ from app.db.models.order_event import OrderEvent
 from app.db.models.order_item import OrderItem
 from app.db.models.platform import AdminAuditLog, LoginEvent, PlatformAdmin, PlatformSettings, UserActivity
 from app.db.models.price_list import PriceList
+from app.db.models.print_agent import PrintAgent
 from app.db.models.print_job import PrintJob
 from app.db.models.product import Product
 from app.db.models.product_alias import ProductAlias
 from app.db.models.product_price import ProductPrice
 from app.db.models.prospect import Prospect, ProspectActivity
+from app.db.models.reorder import ReorderNudge
 from app.db.models.tenant import Tenant
 from app.db.models.user import User
 from app.db.models.zatca import ZatcaDocument, ZatcaUnit
@@ -39,4 +43,5 @@ __all__ = [
     "IntegrationConnection", "IntegrationLink", "IntegrationEvent",
     "PlatformAdmin", "PlatformSettings", "UserActivity", "LoginEvent", "AdminAuditLog",
     "ProductAlias", "AgentSettings", "CollectionReminder",
+    "CustomerPrice", "Promotion", "ReorderNudge", "PrintAgent", "DataRequest",
 ]

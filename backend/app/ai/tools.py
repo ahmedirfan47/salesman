@@ -11,6 +11,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from datetime import timedelta
+from decimal import Decimal
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
@@ -18,9 +19,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.customer import Customer
 from app.db.models.escalation import Escalation
+from app.db.models.order_item import OrderItem
+from app.db.models.product import Product
 from app.db.models.tenant import Tenant
 from app.jobs.queue import WHATSAPP_SEND_DOCUMENT, enqueue
 from app.modules.accounts import service as accounts
+from app.modules.deals import service as deals
 from app.modules.orders import review as order_review
 from app.modules.orders import service as orders_service
 from app.modules.products import matching
@@ -186,7 +190,9 @@ async def _get_price_and_stock(db: AsyncSession, ctx: ToolContext, sku: str) -> 
     result = await pricing_service.get_current_price(db, ctx.tenant_id, sku, ctx.branch_id)
     if not result:
         return {"available": False, "message": f"No active price found for SKU '{sku}'."}
-    return {
+    # this customer's price (their agreed price or a deal) and any live offers on the product
+    customer = await _known_customer(db, ctx)
+    out = {
         "available": True,
         "sku": result["sku"],
         "name": result["name_en"],
@@ -194,6 +200,20 @@ async def _get_price_and_stock(db: AsyncSession, ctx: ToolContext, sku: str) -> 
         "currency": result["currency"],
         "quantity_on_hand": result["quantity_on_hand"],
     }
+    product = await db.scalar(select(Product).where(Product.tenant_id == ctx.tenant_id, Product.sku == result["sku"]))
+    if product is not None:
+        quotes, _ = await deals.quote(db, ctx.tenant_id, ctx.branch_id, customer.id if customer else None,
+                                      [(product.id, 1, Decimal(str(result["unit_price"])))])
+        if quotes[0].source != "list":
+            out["unit_price"] = float(quotes[0].unit_price)
+            out["list_price"] = float(quotes[0].list_price)
+            out["price_note"] = "This customer's agreed price" if quotes[0].source == "customer" \
+                else f"Deal: {quotes[0].promotion_name}"
+        offers = (await deals.offers_for(db, ctx.tenant_id, ctx.branch_id, customer.id if customer else None,
+                                         [product.id])).get(product.id)
+        if offers:
+            out["offers"] = offers   # e.g. "Buy 10 Tomatoes 5kg box, get 1 free": mention it, don't push it
+    return out
 
 
 async def _known_customer(db: AsyncSession, ctx: ToolContext) -> Customer | None:
@@ -235,6 +255,7 @@ async def _place_order(
                 branch_id=ctx.branch_id,
             ),
             review=review,
+            source="ai",
             ai_lines=[
                 {"sku": line["sku"], "quantity": line["quantity"], "wording": line["wording"], "score": line["score"]}
                 for line in lines
@@ -260,6 +281,12 @@ async def _place_order(
         # "stock": checking availability; "account": the team must approve the order on their account;
         # "checking_items": the team is confirming the products or quantities
         "review_reason": review_reason,
+        # free goods the customer earned from a deal: tell them
+        "free_items": [
+            {"name": name, "quantity": qty} for name, qty in await db.execute(
+                select(OrderItem.product_name, OrderItem.quantity).where(OrderItem.order_id == order.id,
+                                                                         OrderItem.is_free.is_(True)))
+        ],
     }
 
 

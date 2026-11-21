@@ -24,58 +24,57 @@ import logging
 import math
 import re
 import uuid
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import String, and_, cast, exists, func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.accounts import CustomerPayment, PaymentAllocation, SalesInvoice
 from app.db.models.branch import Branch
 from app.db.models.customer import Customer
 from app.db.models.integration import IntegrationConnection, IntegrationLink
-from app.db.models.inventory import Inventory
 from app.db.models.order import Order
-from app.db.models.order_item import OrderItem
-from app.db.models.product import Product
-from app.db.models.product_price import ProductPrice
 from app.modules.accounts import service as accounts
-from app.modules.integrations import store
+from app.modules.integrations import catalog, store
+from app.modules.integrations.base import (  # noqa: F401 -- re-exported for the service and tests
+    CENT, LIVE_ORDER, PENDING_ORDER, SYNC_LABEL, Result, Skip, SyncProblem, connected_after, rate_key,
+)
 from app.modules.integrations.odoo_client import OdooClient
-from app.modules.pricing import service as pricing
-from app.schemas.pricing import PriceLineIn, PriceListCreate
+from app.schemas.pricing import PriceLineIn
 
 logger = logging.getLogger("salesman.integrations")
 
-CENT = Decimal("0.01")
+NAME = "Odoo"
 PAYMENT_METHODS = accounts.PAYMENT_METHODS
-LIVE_ORDER = ("confirmed", "preparing", "dispatched", "delivered", "completed")
-PENDING_ORDER = ("confirmed", "preparing", "dispatched")
-SYNC_LABEL = "Prices and stock"
+# what the connect form asks for (the dashboard shows these labels)
+CONNECT_FIELDS = {
+    "url": {"label": "Odoo address", "placeholder": "https://yourcompany.odoo.com"},
+    "database": {"label": "Database", "placeholder": "yourcompany", "optional": True},
+    "username": {"label": "Login (email)", "placeholder": "admin@yourcompany.com", "optional": True},
+    "api_key": {"label": "API key", "placeholder": "From Odoo: Preferences > Account Security"},
+}
+_connected_after = connected_after
 
 
-class SyncProblem(Exception):
-    """Something the business has to fix (in Salesman or Odoo) before this can be sent."""
+def open_client(url: str, database: str | None, username: str | None, key: str, conn_settings: dict | None = None,
+                *, api: str | None = None, version: str | None = None) -> OdooClient:
+    return OdooClient(url, database, username, key, api=api, version=version)
 
 
-class Skip(Exception):
-    """Nothing to send. quiet=True: don't even list it."""
-
-    def __init__(self, message: str, quiet: bool = False):
-        super().__init__(message)
-        self.quiet = quiet
-
-
-@dataclass
-class Result:
-    status: str = "ok"            # ok | warning
-    message: str | None = None
-    external_ref: str | None = None
-
-
-def rate_key(rate) -> str:
-    return str(Decimal(str(rate)).quantize(CENT))
+def clean_setting(key: str, value):
+    """Settings the owner sends, in the types this connector uses (Odoo ids are integers)."""
+    if key == "taxes":
+        return {rate_key(rate): int(tax) for rate, tax in value.items() if tax}
+    if key == "payment_journals":
+        return {m: int(j) for m, j in value.items() if j and m in PAYMENT_METHODS}
+    if key == "branches":
+        return {str(b): {"warehouse_id": int(m["warehouse_id"]) if m.get("warehouse_id") else None,
+                         "pricelist_id": int(m["pricelist_id"]) if m.get("pricelist_id") else None}
+                for b, m in value.items()}
+    if key in ("company_id", "sales_journal_id") and value is not None:
+        return int(value)
+    return value
 
 
 def _ctx(s: dict, **extra) -> dict:
@@ -328,10 +327,6 @@ def _tax(s: dict, rate) -> int:
 
 
 # ---- orders ---------------------------------------------------------------------------------
-
-def _connected_after(conn: IntegrationConnection, when: datetime | None) -> bool:
-    return conn.connected_at is None or when is None or when >= conn.connected_at
-
 
 async def push_order(db: AsyncSession, conn: IntegrationConnection, client: OdooClient, order: Order) -> Result:
     s = conn.settings
@@ -684,55 +679,7 @@ async def _fixed_prices(client: OdooClient, ctx: dict, pricelist_id: int) -> tup
     return variants, templates, unsupported
 
 
-async def _pending(db: AsyncSession, conn: IntegrationConnection, branch_id: uuid.UUID) -> dict[str, int]:
-    """Stock Salesman has promised that Odoo doesn't know about yet (orders not sent so far)."""
-    sent = exists().where(and_(
-        IntegrationLink.connection_id == conn.id, IntegrationLink.entity == "order",
-        IntegrationLink.local_key == cast(Order.id, String),
-    ))
-    q = (
-        select(OrderItem.sku, func.sum(OrderItem.quantity))
-        .join(Order, Order.id == OrderItem.order_id)
-        .where(Order.tenant_id == conn.tenant_id, Order.branch_id == branch_id, Order.status.in_(PENDING_ORDER), ~sent)
-        .group_by(OrderItem.sku)
-    )
-    if conn.connected_at is not None:
-        q = q.where(Order.confirmed_at >= conn.connected_at)
-    return {sku: int(qty or 0) for sku, qty in await db.execute(q)}
-
-
-async def _apply_branch(db: AsyncSession, conn: IntegrationConnection, branch: Branch, lines: list[PriceLineIn]) -> dict:
-    rows = await db.execute(
-        select(Product.sku, ProductPrice.unit_price, ProductPrice.currency)
-        .join(ProductPrice, ProductPrice.product_id == Product.id)
-        .where(ProductPrice.tenant_id == conn.tenant_id, ProductPrice.branch_id == branch.id, ProductPrice.effective_to.is_(None))
-    )
-    current = {sku: (Decimal(str(price)).quantize(CENT), cur) for sku, price, cur in rows}
-    wanted = {ln.sku: (Decimal(str(ln.unit_price)).quantize(CENT), ln.currency) for ln in lines}
-    if current != wanted:
-        plist = await pricing.create_price_list(db, conn.tenant_id, PriceListCreate(source_filename="Odoo sync", lines=lines),
-                                                branch_id=branch.id)
-        await pricing.activate_price_list(db, conn.tenant_id, plist.id)
-        return {"prices_changed": True, "stock_changed": len(lines)}
-    stock = {pid: qty for pid, qty in await db.execute(
-        select(Inventory.product_id, Inventory.quantity_on_hand).where(
-            Inventory.tenant_id == conn.tenant_id, Inventory.branch_id == branch.id)
-    )}
-    products = {p.sku: p for p in await db.scalars(
-        select(Product).where(Product.tenant_id == conn.tenant_id, Product.sku.in_(list(wanted)))
-    )}
-    changed = 0
-    for ln in lines:
-        product = products.get(ln.sku)
-        if product is not None and stock.get(product.id, 0) != ln.quantity:
-            await pricing._set_inventory(db, tenant_id=conn.tenant_id, branch_id=branch.id, product_id=product.id,
-                                         new_quantity=ln.quantity, reason="erp_sync")
-            changed += 1
-    await db.commit()
-    return {"prices_changed": False, "stock_changed": changed}
-
-
-async def pull_catalog(db: AsyncSession, conn: IntegrationConnection, client: OdooClient) -> Result:
+async def fetch_catalog(db: AsyncSession, conn: IntegrationConnection, client: OdooClient) -> catalog.Catalog:
     s = conn.settings
     if not s.get("pull_catalog"):
         raise Skip("Fetching prices and stock from Odoo is switched off", quiet=True)
@@ -759,33 +706,16 @@ async def pull_catalog(db: AsyncSession, conn: IntegrationConnection, client: Od
             duplicates.append(sku)
             continue
         by_sku[sku] = row
+    products = [
+        catalog.CatalogProduct(sku=sku, external_id=str(row["id"]), name_en=str(row["name"])[:255],
+                               name_ar=str(arabic[row["id"]])[:255] if arabic.get(row["id"]) else None,
+                               cost=Decimal(str(row["standard_price"])) if row.get("standard_price") else None)
+        for sku, row in by_sku.items()
+    ]
+    cat = catalog.Catalog(products=products, cost_currency=s.get("company_currency"),
+                          empty_message="No branch is linked to an Odoo warehouse.", source="Odoo sync")
 
-    # products: names and costs follow Odoo
-    existing = {p.sku: p for p in await db.scalars(
-        select(Product).where(Product.tenant_id == conn.tenant_id, Product.sku.in_(list(by_sku)))
-    )}
-    for sku, row in by_sku.items():
-        product = existing.get(sku)
-        name_ar = arabic.get(row["id"])
-        if product is not None:
-            product.name_en = str(row["name"])[:255]
-            if name_ar and name_ar != row["name"]:
-                product.name_ar = str(name_ar)[:255]
-            if row.get("standard_price"):
-                product.cost_price = Decimal(str(row["standard_price"])).quantize(CENT)
-                product.cost_currency = s.get("company_currency")
-            product.is_active = True
-        link = await store.get_link(db, conn, "product", sku)
-        if link is None or link.external_id != str(row["id"]):
-            await store.save_link(db, conn, "product", sku, row["id"], external_ref=row["name"])
-    await db.commit()
-
-    branches = {b.id: b for b in await db.scalars(select(Branch).where(Branch.tenant_id == conn.tenant_id, Branch.is_active.is_(True)))}
-    summary, notes = [], []
-    for branch_id, mapping in (s.get("branches") or {}).items():
-        branch = branches.get(uuid.UUID(branch_id))
-        if branch is None or not (mapping or {}).get("warehouse_id"):
-            continue
+    for branch, mapping in await catalog.mapped_branches(db, conn):
         bctx = _ctx(s, warehouse_id=int(mapping["warehouse_id"]), warehouse=int(mapping["warehouse_id"]))
         stock = {r["id"]: r.get("free_qty", 0) for r in await client.search_read_all("product.product", domain, ["free_qty"], context=bctx)}
         currency = s.get("company_currency") or "SAR"
@@ -795,29 +725,28 @@ async def pull_catalog(db: AsyncSession, conn: IntegrationConnection, client: Od
             pl = await client.read("product.pricelist", [int(mapping["pricelist_id"])], ["currency_id"], context=ctx)
             if pl and pl[0].get("currency_id"):
                 currency = pl[0]["currency_id"][1]
-        pending = await _pending(db, conn, branch.id)
+        promised = await catalog.pending(db, conn, branch.id)
         lines = []
         for sku, row in by_sku.items():
             price = variants.get(row["id"], templates.get(_m2o(row.get("product_tmpl_id")), row["lst_price"]))
-            qty = max(int(math.floor(stock.get(row["id"], 0) or 0)) - pending.get(sku, 0), 0)
+            qty = max(int(math.floor(stock.get(row["id"], 0) or 0)) - promised.get(sku, 0), 0)
             lines.append(PriceLineIn(
                 sku=sku, unit_price=Decimal(str(price)).quantize(CENT), quantity=qty, currency=currency[:3],
                 unit_cost=Decimal(str(row["standard_price"])).quantize(CENT) if row.get("standard_price") else None,
                 name_en=str(row["name"])[:255], name_ar=(str(arabic[row["id"]])[:255] if arabic.get(row["id"]) else None),
             ))
-        applied = await _apply_branch(db, conn, branch, lines)
-        summary.append({"branch": branch.name, "products": len(lines), **applied})
+        cat.branches.append((branch, lines))
         if unsupported:
-            notes.append(f"{branch.name}: {unsupported} price rule(s) in the Odoo price list use percentages, formulas "
-                         "or categories; those products use their sales price.")
+            cat.notes.append(f"{branch.name}: {unsupported} price rule(s) in the Odoo price list use percentages, formulas "
+                             "or categories; those products use their sales price.")
     if duplicates:
-        notes.append("Several Odoo products share the Internal Reference " + ", ".join(sorted(set(duplicates))[:10])
-                     + "; only the first was used.")
-    message = "; ".join(
-        f"{x['branch']}: {x['products']} products, " + ("prices updated" if x["prices_changed"] else f"{x['stock_changed']} stock change(s)")
-        for x in summary
-    ) or "No branch is linked to an Odoo warehouse."
-    return Result("warning" if notes else "ok", " ".join([message + "."] + notes))
+        cat.notes.append("Several Odoo products share the Internal Reference " + ", ".join(sorted(set(duplicates))[:10])
+                         + "; only the first was used.")
+    return cat
+
+
+async def pull_catalog(db: AsyncSession, conn: IntegrationConnection, client: OdooClient) -> Result:
+    return await catalog.apply(db, conn, await fetch_catalog(db, conn, client))
 
 
 # ---- balances -------------------------------------------------------------------------------

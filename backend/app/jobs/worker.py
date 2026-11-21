@@ -74,7 +74,8 @@ async def run_once(session_factory: async_sessionmaker) -> bool:
 
 
 async def sweep(session_factory: async_sessionmaker) -> None:
-    """Periodic work: issue monthly invoices that have come due, and queue payment reminders."""
+    """Periodic work: issue monthly invoices that have come due, queue payment reminders and reorder
+    messages, and apply each business's message-retention period."""
     from app.modules.billing.service import issue_due_invoices
     from app.modules.collections.service import queue_all
 
@@ -86,6 +87,18 @@ async def sweep(session_factory: async_sessionmaker) -> None:
         reminders = await queue_all(db)
     if reminders:
         logger.info("payment reminders queued", extra={"ctx_count": reminders})
+
+    from app.modules.privacy.service import apply_retention_all
+    from app.modules.reorder.service import queue_all as queue_reorders
+
+    async with session_factory() as db:
+        nudges = await queue_reorders(db)
+    if nudges:
+        logger.info("reorder messages queued", extra={"ctx_count": nudges})
+    async with session_factory() as db:
+        purged = await apply_retention_all(db)
+    if purged:
+        logger.info("old messages removed", extra={"ctx_count": purged})
 
 
 async def erp_tick(session_factory: async_sessionmaker) -> None:

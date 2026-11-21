@@ -11,6 +11,7 @@ from app.jobs.queue import (
     ERP_PULL,
     ERP_PUSH,
     WHATSAPP_COLLECTION_REMINDER,
+    WHATSAPP_REORDER_NUDGE,
     WHATSAPP_INBOUND_AUDIO,
     WHATSAPP_INBOUND_TEXT,
     WHATSAPP_ORDER_UPDATE,
@@ -93,6 +94,15 @@ async def erp_pull(db: AsyncSession, p: dict) -> None:
     """Refresh products, prices and stock from the connected ERP."""
     result = await integrations.run_pull(db, p)
     logger.info("erp pull", extra={"ctx_connection_id": p.get("connection_id"), "ctx_result": result})
+
+@handler(WHATSAPP_REORDER_NUDGE)
+async def reorder_nudge(db: AsyncSession, p: dict) -> None:
+    """Send one reorder message. A Meta outage raises, so the queue retries it."""
+    from app.modules.reorder import service as reorder
+
+    result = await reorder.send_nudge(db, uuid.UUID(p["nudge_id"]))
+    logger.info("reorder nudge", extra={"ctx_nudge_id": p["nudge_id"], "ctx_result": result})
+
 
 @handler(WHATSAPP_COLLECTION_REMINDER)
 async def collection_reminder(db: AsyncSession, p: dict) -> None:

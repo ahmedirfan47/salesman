@@ -40,6 +40,7 @@ from app.db.models.order_item import OrderItem
 from app.db.models.product import Product
 from app.db.models.product_price import ProductPrice
 from app.modules.accounts import service as accounts
+from app.modules.deals import service as deals
 from app.modules.integrations import hooks as erp
 from app.modules.notifications import service as notifications
 from app.modules.printing import service as printing_service
@@ -88,6 +89,25 @@ async def _order_branch(
     return branch_id
 
 
+def _item(order: Order, tenant_id: uuid.UUID, e: dict, line_total: Decimal) -> OrderItem:
+    return OrderItem(
+        order_id=order.id,
+        tenant_id=tenant_id,
+        product_id=e["product"].id,
+        sku=e["product"].sku,
+        product_name=e["product"].name_en,
+        quantity=e["quantity"],
+        unit_price=e["unit_price"],
+        unit_cost=e["product"].cost_price,
+        line_total=line_total,
+        available_at_order=e["available"],
+        list_price=e["list_price"],
+        price_source=e["price_source"],
+        promotion_id=e["promotion_id"],
+        is_free=e["free"],
+    )
+
+
 async def create_order(
     db: AsyncSession,
     tenant_id: uuid.UUID,
@@ -97,11 +117,17 @@ async def create_order(
     scope: uuid.UUID | None = None,
     review: list[dict] | None = None,
     ai_lines: list[dict] | None = None,
+    source: str = "manual",
 ) -> Order:
     """`review`: reasons the AI's order needs a person to check it (see
     app.modules.orders.review). Any reason holds the order, like a stock or
     credit problem does. `ai_lines`: the customer's own words per line, kept
-    on the escalation so staff see what was asked for."""
+    on the escalation so staff see what was asked for. `source`: ai when the
+    WhatsApp agent placed it (used by the accuracy report).
+
+    Prices: the branch list price, unless the customer has their own price or
+    a deal applies (app.modules.deals); free goods from buy-X-get-Y deals are
+    added as separate lines at price 0, never taking stock a paid line needs."""
     now = datetime.now(timezone.utc)
     review = review or []
 
@@ -165,11 +191,37 @@ async def create_order(
                 {"sku": product.sku, "requested": line.quantity, "available": available}
             )
 
+    # 1a. customer prices and deals, then free goods (only from stock the paid lines leave)
+    quotes, free_goods = await deals.quote(
+        db, tenant_id, branch_id, customer.id if customer else None,
+        [(e["product"].id, e["quantity"], Decimal(str(e["price"].unit_price))) for e in resolved],
+    )
+    for e, q in zip(resolved, quotes):
+        e.update(unit_price=q.unit_price, list_price=q.list_price, price_source=q.source,
+                 promotion_id=q.promotion_id, free=False)
+    free_notes: list[str] = []
+    for f in free_goods:
+        paid = next((e for e in resolved if e["product"].id == f.product_id), None)
+        product = paid["product"] if paid else await db.get(Product, f.product_id)
+        inv = paid["inv"] if paid else await db.scalar(
+            select(Inventory).where(Inventory.tenant_id == tenant_id, Inventory.branch_id == branch_id,
+                                    Inventory.product_id == f.product_id).with_for_update()
+        )
+        on_hand = inv.quantity_on_hand if inv else 0
+        spare = on_hand - sum(e["quantity"] for e in resolved if e["product"].id == f.product_id)
+        qty = max(min(f.quantity, spare), 0)
+        if qty < f.quantity:
+            free_notes.append(f"{f.promotion_name}: {qty} of {f.quantity} free {product.name_en} given (stock)")
+        if qty > 0:
+            resolved.append({"product": product, "price": None, "quantity": qty, "available": on_hand, "inv": inv,
+                             "unit_price": Decimal("0.00"), "list_price": None, "price_source": "promotion",
+                             "promotion_id": f.promotion_id, "free": True})
+
     # 1b. credit control for known customers
     credit_reasons: list[dict] = []
     if customer is not None:
         order_amount = sum(
-            (Decimal(str(e["price"].unit_price)) * e["quantity"] for e in resolved), Decimal("0")
+            (e["unit_price"] * e["quantity"] for e in resolved), Decimal("0")
         )
         credit_reasons = await accounts.credit_check(db, tenant_id, customer, order_amount)
 
@@ -187,6 +239,7 @@ async def create_order(
             whatsapp_number=cust_whatsapp,
             zone_id=cust_zone_id,
             status="requires_human_review",
+            source=source,
             currency=resolved[0]["price"].currency,
             total_amount=Decimal("0"),
         )
@@ -195,22 +248,9 @@ async def create_order(
 
         total = Decimal("0")
         for e in resolved:
-            line_total = Decimal(str(e["price"].unit_price)) * e["quantity"]
+            line_total = e["unit_price"] * e["quantity"]
             total += line_total
-            db.add(
-                OrderItem(
-                    order_id=order.id,
-                    tenant_id=tenant_id,
-                    product_id=e["product"].id,
-                    sku=e["product"].sku,
-                    product_name=e["product"].name_en,
-                    quantity=e["quantity"],
-                    unit_price=e["price"].unit_price,
-                    unit_cost=e["product"].cost_price,
-                    line_total=line_total,
-                    available_at_order=e["available"],
-                )
-            )
+            db.add(_item(order, tenant_id, e, line_total))
         order.total_amount = total
 
         parts = []
@@ -237,7 +277,7 @@ async def create_order(
                 branch_id=branch_id,
                 reason_type=reason_type,
                 context={"order_number": order_number, "shortfalls": shortfalls, "credit": credit_reasons,
-                         "review": review, "lines": ai_lines or []},
+                         "review": review, "lines": ai_lines or [], "free_notes": free_notes},
                 ai_recommendation=f"{'. '.join(parts)}. {advice}",
                 order_id=order.id,
                 customer_name=cust_name,
@@ -260,6 +300,7 @@ async def create_order(
         whatsapp_number=cust_whatsapp,
         zone_id=cust_zone_id,
         status="confirmed",
+        source=source,
         currency=resolved[0]["price"].currency,
         price_list_id=resolved[0]["price"].price_list_id,
         confirmed_at=now,
@@ -270,24 +311,11 @@ async def create_order(
 
     total = Decimal("0")
     for e in resolved:
-        line_total = Decimal(str(e["price"].unit_price)) * e["quantity"]
+        line_total = e["unit_price"] * e["quantity"]
         total += line_total
-        db.add(
-            OrderItem(
-                order_id=order.id,
-                tenant_id=tenant_id,
-                product_id=e["product"].id,
-                sku=e["product"].sku,
-                product_name=e["product"].name_en,
-                quantity=e["quantity"],
-                unit_price=e["price"].unit_price,
-                unit_cost=e["product"].cost_price,
-                line_total=line_total,
-                available_at_order=e["available"],
-            )
-        )
-        # decrement stock via the immutable ledger
-        before = e["available"]
+        db.add(_item(order, tenant_id, e, line_total))
+        # decrement stock via the immutable ledger (a product can be on a paid and a free line)
+        before = e["inv"].quantity_on_hand
         after = before - e["quantity"]
         e["inv"].quantity_on_hand = after
         db.add(
@@ -309,10 +337,10 @@ async def create_order(
     slip_items = [
         {
             "sku": e["product"].sku,
-            "name": e["product"].name_en,
+            "name": e["product"].name_en + (" (FREE)" if e["free"] else ""),
             "quantity": e["quantity"],
-            "unit_price": float(e["price"].unit_price),
-            "line_total": float(Decimal(str(e["price"].unit_price)) * e["quantity"]),
+            "unit_price": float(e["unit_price"]),
+            "line_total": float(e["unit_price"] * e["quantity"]),
         }
         for e in resolved
     ]

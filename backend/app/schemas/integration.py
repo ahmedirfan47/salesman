@@ -9,26 +9,33 @@ class ProviderOut(BaseModel):
     key: str
     name: str
     available: bool
+    # what the connect form asks for, per field: label, placeholder, optional, default
+    connect_fields: dict = {}
 
 
 class ConnectIn(BaseModel):
     provider: str = "odoo"
-    url: str = Field(min_length=4, max_length=255)
+    url: str | None = Field(default=None, max_length=255)
+    tenant: str | None = Field(default=None, max_length=120)      # Business Central: Microsoft Entra tenant
     database: str | None = Field(default=None, max_length=120)
     username: str | None = Field(default=None, max_length=255)
     api_key: str | None = Field(default=None, max_length=255)   # empty: keep the saved key
 
 
+Ref = int | str   # Odoo and SAP price lists use numbers; SAP codes and Business Central ids are strings
+
+
 class BranchMapping(BaseModel):
-    warehouse_id: int | None = None
-    pricelist_id: int | None = None
+    warehouse_id: Ref | None = None
+    pricelist_id: Ref | None = None
 
 
 class SettingsIn(BaseModel):
-    company_id: int | None = None
-    sales_journal_id: int | None = None
-    taxes: dict[str, int | None] | None = None
-    payment_journals: dict[str, int | None] | None = None
+    company_id: Ref | None = None
+    sales_journal_id: Ref | None = None
+    taxes: dict[str, Ref | None] | None = None
+    payment_journals: dict[str, Ref | None] | None = None
+    adjustment_account: Ref | None = None    # SAP and Business Central: account for lines without an item
     branches: dict[str, BranchMapping] | None = None
     push_orders: bool | None = None
     validate_deliveries: bool | None = None
@@ -97,6 +104,32 @@ class BalanceOut(BaseModel):
     customer_id: uuid.UUID
     name: str | None
     salesman: Decimal
-    odoo: Decimal
+    odoo: Decimal            # the ERP's balance (named for the first connector; same as `erp`)
+    erp: Decimal | None = None
     difference: Decimal
-    partner_id: int
+    partner_id: int | str
+
+
+class TestOut(BaseModel):
+    ok: bool
+    kind: str
+    message: str
+    latency_ms: int
+    version: str | None = None
+    companies: int | None = None
+    warehouses: int | None = None
+    price_lists: int | None = None
+    taxes: int | None = None
+    problems: list[str] = []
+
+
+class HealthCheck(BaseModel):
+    key: str
+    status: str
+    message: str
+
+
+class HealthOut(BaseModel):
+    status: str              # healthy | degraded | down | off
+    checks: list[HealthCheck]
+    checked_at: datetime

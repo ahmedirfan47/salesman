@@ -42,6 +42,8 @@ STATIC = [
     "/zatca", "/zatca/documents",
     "/integrations", "/integrations/options", "/integrations/balances", "/integrations/events",
     "/products/aliases", "/agent/settings", "/accounts/reminders",
+    "/deals/customer-prices", "/deals/promotions", "/deals/quote?sku=MAN-4&quantity=20", "/reports/accuracy",
+    "/reorder", "/printing/agents", "/privacy/requests", "/integrations/health",
 ]
 
 

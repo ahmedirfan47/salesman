@@ -7,6 +7,7 @@ import {
   LayoutDashboard, Package, Tag, ShoppingCart, AlertTriangle,
   FileBarChart, Printer, MessageSquare, Users, MapPin, ClipboardList,
   Truck, Contact, CreditCard, LogOut, Menu, X, TrendingUp, Target, Building2, Wallet, Cable,
+  Headphones, BadgePercent, BellRing, Crosshair, ShieldCheck,
 } from "lucide-react";
 import { clearToken, isDemo } from "@/lib/api";
 import { useMe, can } from "@/lib/use-me";
@@ -18,18 +19,23 @@ const nav = [
   { href: "/customers", label: "Customers", icon: Contact, cap: "manage_users" },
   { href: "/prospects", label: "Prospects", icon: Target, cap: "manage_prospects" },
   { href: "/pricing", label: "Pricing", icon: Tag, cap: "manage_pricing" },
+  { href: "/deals", label: "Deals", icon: BadgePercent, cap: "manage_pricing" },
   { href: "/orders", label: "Orders", icon: ShoppingCart, cap: "view_orders" },
   { href: "/accounts", label: "Accounts", icon: Wallet, cap: "view_accounts" },
   { href: "/assignments", label: "Assignments", icon: ClipboardList, cap: "dispatch_order" },
   { href: "/deliveries", label: "My Deliveries", icon: Truck, cap: "deliver_order" },
+  { href: "/operator", label: "Operator (عربي)", icon: Headphones, cap: "resolve_escalation" },
   { href: "/escalations", label: "Escalations", icon: AlertTriangle, cap: "resolve_escalation" },
   { href: "/conversations", label: "Conversations", icon: MessageSquare, cap: "view_conversations" },
   { href: "/reports", label: "Reports", icon: FileBarChart, cap: "view_reports" },
+  { href: "/accuracy", label: "AI Accuracy", icon: Crosshair, cap: "view_reports" },
+  { href: "/reorders", label: "Reorder Reminders", icon: BellRing, cap: "view_reports" },
   { href: "/analytics", label: "Analytics", icon: TrendingUp, cap: "view_analytics" },
   { href: "/printing", label: "Print Queue", icon: Printer, cap: "view_printing" },
   { href: "/zones", label: "Zones", icon: MapPin, cap: "manage_users" },
   { href: "/branches", label: "Branches", icon: Building2, cap: "manage_users" },
   { href: "/integrations", label: "Integrations", icon: Cable, cap: "manage_integrations" },
+  { href: "/privacy", label: "Data Protection", icon: ShieldCheck, cap: "manage_users" },
   { href: "/billing", label: "Billing & Plan", icon: CreditCard, cap: "view_billing" },
   { href: "/admin", label: "Team & Access", icon: Users, cap: "manage_users" },
 ];
